@@ -40,6 +40,10 @@ PAYMENT_LOG_CH  = os.getenv("PAYMENT_LOG_CHANNEL", "")
 WEBAPP_URL      = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_KEY  = os.getenv("PROXYCHECK_API_KEY", "")
 
+# Fix for missing https:// in Railway URL
+if WEBAPP_URL.startswith("tg56") or not WEBAPP_URL.startswith(("http://", "https://")):
+    WEBAPP_URL = f"https://{WEBAPP_URL}"
+
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,7 +203,7 @@ async def cmd_start(msg: Message, state: FSMContext):
         return await msg.answer(
             f"👋 Welcome, <b>{fname}</b>!\n\n"
             f"⚠️ <b>You must join these channels first to unlock the bot:</b>\n{lines}",
-            kb, disable_web_page_preview=True
+            reply_markup=kb, disable_web_page_preview=True
         )
 
     # 3. Check if user is already verified in DB
@@ -532,7 +536,6 @@ async def admin_panel_cb(cb: CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
-# [ሌሎቹ የአድሚን ፓነል ተግባራት (set_reward, add_ch ወዘተ) ሳይቀየሩ እንዳሉ ይቀጥላሉ...]
 @router.callback_query(F.data == "admin_set_reward")
 async def admin_set_reward(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return await cb.answer("⛔", show_alert=True)
@@ -683,9 +686,10 @@ async def lifespan(app: FastAPI):
 
 api = FastAPI(lifespan=lifespan)
 
+# FIXED: Removed 'webapp/' folder path since index.html is in root directory
 @api.get("/verify", response_class=HTMLResponse)
 async def serve_miniapp(uid: int = 0, ref: int = 0):
-    with open("webapp/index.html", "r") as f:
+    with open("index.html", "r") as f:
         html = f.read()
     html = html.replace("__BACKEND_URL__", WEBAPP_URL)
     return HTMLResponse(content=html)
