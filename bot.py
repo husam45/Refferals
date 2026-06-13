@@ -1,6 +1,6 @@
 """
 bot.py – Telegram Referral Bot + FastAPI Mini App backend
-Flow: /start → inline button → Mini App → auto-close → bot sends result
+Flow: /start → Force Join Check → Rules & Mini App Link → Mini App Verification → Reward & Unlock
 """
 import os, asyncio, hashlib, hmac, json, logging
 from contextlib import asynccontextmanager
@@ -121,11 +121,11 @@ async def server_vpn_check(ip: str) -> bool:
 # Keyboards
 # ─────────────────────────────────────────────────────────────────────────────
 def verify_button_kb(uid: int, ref: int) -> InlineKeyboardMarkup:
-    """The single beautiful inline button that opens the Mini App."""
+    """The single beautiful inline button that opens the Mini App with rules."""
     url = f"{WEBAPP_URL}/verify?uid={uid}&ref={ref}"
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="🔐  Verify Now — Tap to Continue",
+            text="🔐 Open Mini App & Verify",
             web_app=WebAppInfo(url=url)
         )
     ]])
@@ -171,24 +171,25 @@ router = Router()
 async def cmd_start(msg: Message, state: FSMContext):
     await state.clear()
     uid   = msg.from_user.id
-    uname = msg.from_user.username or ""
     fname = msg.from_user.full_name or ""
     args  = msg.text.split()[1] if len(msg.text.split()) > 1 else ""
     ref   = int(args) if args.isdigit() and int(args) != uid else 0
 
-    # Register user
-    if not await db.get_user(uid):
-        await db.create_user(uid, uname, fname, ref or None)
+    # 1. Check if user already exists and is banned
     user = await db.get_user(uid)
-
-    if user["is_banned"]:
+    if user and user["is_banned"]:
         return await msg.answer("🚫 You are banned from this bot.")
 
-    # Force-join check
+    # 2. Force-join check comes FIRST
     not_joined = await check_force_join(uid)
     if not_joined:
         lines = "\n".join(f"  • <a href='{c['invite_link']}'>{c['channel_name']}</a>"
                           for c in not_joined)
+        
+        # Save referral argument in state so we can use it after they click "Check Again"
+        if ref:
+            await state.update_data(pending_ref=ref)
+            
         kb = InlineKeyboardMarkup(inline_keyboard=[
             *[[InlineKeyboardButton(text=f"➕  {c['channel_name']}", url=c["invite_link"])]
               for c in not_joined],
@@ -197,32 +198,34 @@ async def cmd_start(msg: Message, state: FSMContext):
         ])
         return await msg.answer(
             f"👋 Welcome, <b>{fname}</b>!\n\n"
-            f"⚠️ <b>Join these channels first:</b>\n{lines}",
-            reply_markup=kb, disable_web_page_preview=True
+            f"⚠️ <b>You must join these channels first to unlock the bot:</b>\n{lines}",
+            kb, disable_web_page_preview=True
         )
 
-    # Came via referral and not yet verified → show verify button
-    if ref and not await db.is_verified(uid):
+    # 3. Check if user is already verified in DB
+    if await db.is_verified(uid):
+        reward = await db.get_setting("reward_per_referral", "10")
         return await msg.answer(
-            f"👋 Hey <b>{fname}</b>!\n\n"
-            "You arrived via a referral link.\n"
-            "Tap the button below to <b>complete a quick security check</b> "
-            "and activate your account.\n\n"
-            "⚡ Takes less than 5 seconds.",
-            reply_markup=verify_button_kb(uid, ref)
+            f"👋 Welcome back, <b>{fname}</b>!\n\n"
+            f"Earn <b>{reward} coins</b> for every verified referral.",
+            reply_markup=main_menu_kb(uid)
         )
 
-    # Normal start
-    reward = await db.get_setting("reward_per_referral", "10")
-    await msg.answer(
-        f"👋 Welcome back, <b>{fname}</b>!\n\n"
-        f"Earn <b>{reward} coins</b> for every verified referral.",
-        reply_markup=main_menu_kb(uid)
+    # 4. If not verified, Show Rules and Mini App Link
+    rules_text = (
+        f"👋 Hello <b>{fname}</b>!\n\n"
+        f"⚠️ <b>Security Verification Required</b>\n"
+        f"To prevent multi-accounts and bots, you must complete a fast verification.\n\n"
+        f"🚫 <b>Strict Rules:</b>\n"
+        f"• VPN / Proxy is strictly prohibited!\n"
+        f"• Only 1 account allowed per mobile device!\n\n"
+        f"Tap the button below to open the Mini App and auto-verify your system."
     )
+    await msg.answer(rules_text, reply_markup=verify_button_kb(uid, ref))
 
 # ── Re-check force join ───────────────────────────────────────────────────────
 @router.callback_query(F.data == "recheck_join")
-async def recheck_join(cb: CallbackQuery):
+async def recheck_join(cb: CallbackQuery, state: FSMContext):
     uid = cb.from_user.id
     not_joined = await check_force_join(uid)
     if not_joined:
@@ -235,16 +238,29 @@ async def recheck_join(cb: CallbackQuery):
                                   callback_data="recheck_join")],
         ])
         await cb.message.edit_text(
-            f"⚠️ <b>Still not joined:</b>\n{lines}",
+            f"⚠️ <b>Still not joined all channels:</b>\n{lines}",
             reply_markup=kb, disable_web_page_preview=True
         )
     else:
         await cb.message.delete()
-        user = await db.get_user(uid)
-        await cb.message.answer(
-            "✅ All good! You've joined all channels.",
-            reply_markup=main_menu_kb(uid)
-        )
+        
+        # Retrieve pending referral if any
+        state_data = await state.get_data()
+        ref = state_data.get("pending_ref", 0)
+        await state.clear()
+        
+        if await db.is_verified(uid):
+            await cb.message.answer("✅ Verification passed!", reply_markup=main_menu_kb(uid))
+        else:
+            rules_text = (
+                f"✅ Channels joined successfully!\n\n"
+                f"⚠️ <b>Final Step: Security Verification</b>\n"
+                f"🚫 <b>Rules:</b>\n"
+                f"- VPN / Proxy is NOT allowed.\n"
+                f"- Multi-account detection is active.\n\n"
+                f"Please open the Mini App below to complete setup."
+            )
+            await cb.message.answer(rules_text, reply_markup=verify_button_kb(uid, ref))
     await cb.answer()
 
 # ── Main menu ─────────────────────────────────────────────────────────────────
@@ -252,6 +268,11 @@ async def recheck_join(cb: CallbackQuery):
 async def main_menu_cb(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     uid    = cb.from_user.id
+    
+    # Block unverified users trying to access main menu via old callbacks
+    if not await db.is_verified(uid):
+        return await cb.answer("🔒 Please verify first.", show_alert=True)
+        
     reward = await db.get_setting("reward_per_referral", "10")
     await cb.message.edit_text(
         f"🏠 <b>Main Menu</b>\n\nEarn <b>{reward} coins</b> per verified referral.",
@@ -262,6 +283,7 @@ async def main_menu_cb(cb: CallbackQuery, state: FSMContext):
 # ── Balance ───────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "balance")
 async def show_balance(cb: CallbackQuery):
+    if not await db.is_verified(cb.from_user.id): return await cb.answer("🔒 Unverified.", show_alert=True)
     user = await db.get_user(cb.from_user.id)
     bal  = user["balance"] if user else 0.0
     min_wd = await db.get_setting("min_withdrawal", "50")
@@ -276,7 +298,8 @@ async def show_balance(cb: CallbackQuery):
 # ── Referrals ─────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "referrals")
 async def show_referrals(cb: CallbackQuery):
-    uid    = cb.from_user.id
+    uid = cb.from_user.id
+    if not await db.is_verified(uid): return await cb.answer("🔒 Unverified.", show_alert=True)
     count  = await db.get_referral_count(uid)
     reward = float(await db.get_setting("reward_per_referral", "10"))
     earned = count * reward
@@ -292,7 +315,8 @@ async def show_referrals(cb: CallbackQuery):
 # ── Referral link ─────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "reflink")
 async def show_reflink(cb: CallbackQuery):
-    uid  = cb.from_user.id
+    uid = cb.from_user.id
+    if not await db.is_verified(uid): return await cb.answer("🔒 Unverified.", show_alert=True)
     me   = await bot.get_me()
     link = f"https://t.me/{me.username}?start={uid}"
     await cb.message.edit_text(
@@ -309,6 +333,7 @@ async def show_reflink(cb: CallbackQuery):
 @router.callback_query(F.data == "withdraw")
 async def withdraw_start(cb: CallbackQuery, state: FSMContext):
     uid    = cb.from_user.id
+    if not await db.is_verified(uid): return await cb.answer("🔒 Unverified.", show_alert=True)
     user   = await db.get_user(uid)
     min_wd = float(await db.get_setting("min_withdrawal", "50"))
     bal    = user["balance"] if user else 0.0
@@ -462,7 +487,7 @@ async def wd_approve(cb: CallbackQuery):
         await bot.send_message(
             wd["user_id"],
             "🎉 <b>Withdrawal Approved!</b>\n\n"
-            "Your payment has been processed. Please check your account."
+            "Successful! Your withdrawal request has been completed. Please check your account."
         )
     except Exception: pass
 
@@ -507,6 +532,7 @@ async def admin_panel_cb(cb: CallbackQuery, state: FSMContext):
     )
     await cb.answer()
 
+# [ሌሎቹ የአድሚን ፓነል ተግባራት (set_reward, add_ch ወዘተ) ሳይቀየሩ እንዳሉ ይቀጥላሉ...]
 @router.callback_query(F.data == "admin_set_reward")
 async def admin_set_reward(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return await cb.answer("⛔", show_alert=True)
@@ -645,6 +671,7 @@ async def admin_pending_wd(cb: CallbackQuery):
         )
     await cb.answer()
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI app
 # ─────────────────────────────────────────────────────────────────────────────
@@ -678,64 +705,71 @@ async def api_verify(request: Request):
     if not tg_user:
         raise HTTPException(403, "Invalid Telegram data")
     uid = int(tg_user.get("id", 0))
+    uname = tg_user.get("username", "")
+    fname = tg_user.get("first_name", "")
+
     if not uid:
         raise HTTPException(403, "No user ID")
 
-    # 2. Check if already verified (Telegram ID check)
+    # 2. Check if already verified
     if await db.is_verified(uid):
         return JSONResponse({"status": "already_verified"})
 
-    # 3. VPN / Proxy — client flag + server re-check
+    # 3. VPN / Proxy Check
     if is_vpn or await server_vpn_check(ip):
+        await db.create_user(uid, uname, fname, None) # Register to ban them
         await db.ban_user(uid)
         try:
             await bot.send_message(
                 uid,
                 "🚫 <b>Verification Failed</b>\n\n"
-                "VPN / Proxy detected. This is not allowed.\n"
-                "Your access has been restricted."
+                "VPN or Proxy detected! This is strictly forbidden by our rules.\n"
+                "Your account has been banned."
             )
         except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "vpn"})
 
-    # 4. Multi-account — fingerprint + IP check against ALL users
+    # 4. Multi-account detection (Fingerprint & IP)
     duplicate = await db.find_duplicate(ip, fingerprint, uid)
     if duplicate:
+        await db.create_user(uid, uname, fname, None) # Register to ban them
         await db.ban_user(uid)
         try:
             await bot.send_message(
                 uid,
                 "🚫 <b>Multi-Account Detected</b>\n\n"
-                "This device or network is already linked to another account.\n"
-                "You are not allowed to create multiple accounts."
+                "Our system detected multiple accounts running from this same device.\n"
+                "Creation of multiple accounts is not allowed. You are banned."
             )
         except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "multiaccount"})
 
-    # 5. All clear — save and reward
+    # 5. ALL CLEAR: Create user, save verification, and give reward
+    await db.create_user(uid, uname, fname, ref_id or None)
     await db.save_verification(uid, ip, ua, fingerprint)
 
+    # Process reward for referrer
     if ref_id and ref_id != uid:
         referrer = await db.get_user(ref_id)
-        if referrer:
+        if referrer and await db.is_verified(ref_id):
             reward = float(await db.get_setting("reward_per_referral", "10"))
             await db.add_balance(ref_id, reward)
             try:
                 new_bal = referrer["balance"] + reward
                 await bot.send_message(
                     ref_id,
-                    f"🎉 <b>Referral Reward!</b>\n\n"
-                    f"A new user verified via your link.\n"
-                    f"<b>+{reward:.2f} coins</b> added to your balance.\n"
-                    f"New balance: <b>{new_bal:.2f} coins</b>"
+                    f"🎉 <b>New Referral Milestone!</b>\n\n"
+                    f"A user has successfully passed verification using your link.\n"
+                    f"<b>+{reward:.2f} coins</b> credited.\n"
+                    f"Current Balance: <b>{new_bal:.2f} coins</b>"
                 )
             except Exception: pass
 
     try:
         await bot.send_message(
             uid,
-            "✅ <b>Verification Complete!</b>\n\n"
-            "Your account is now active. Use the menu below.",
+            "✅ <b>Verification Completed Successfully!</b>\n\n"
+            "Your account is now fully active. You can now use the menu functions below.",
             reply_markup=main_menu_kb(uid)
         )
     except Exception: pass
@@ -743,7 +777,7 @@ async def api_verify(request: Request):
     return JSONResponse({"status": "verified"})
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Bot polling (runs inside FastAPI event loop)
+# Bot polling
 # ─────────────────────────────────────────────────────────────────────────────
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
