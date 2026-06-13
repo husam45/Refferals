@@ -179,12 +179,10 @@ async def cmd_start(msg: Message, state: FSMContext):
     args  = msg.text.split()[1] if len(msg.text.split()) > 1 else ""
     ref   = int(args) if args.isdigit() and int(args) != uid else 0
 
-    # 1. Check if user already exists and is banned
     user = await db.get_user(uid)
     if user and user["is_banned"]:
         return await msg.answer("🚫 You are banned from this bot.")
 
-    # 2. Force-join check comes FIRST
     not_joined = await check_force_join(uid)
     if not_joined:
         lines = "\n".join(f"  • <a href='{c['invite_link']}'>{c['channel_name']}</a>"
@@ -205,7 +203,6 @@ async def cmd_start(msg: Message, state: FSMContext):
             reply_markup=kb, disable_web_page_preview=True
         )
 
-    # 3. Check if user is already verified in DB
     if await db.is_verified(uid):
         reward = await db.get_setting("reward_per_referral", "10")
         return await msg.answer(
@@ -214,7 +211,6 @@ async def cmd_start(msg: Message, state: FSMContext):
             reply_markup=main_menu_kb(uid)
         )
 
-    # 4. If not verified, Show Rules and Mini App Link
     rules_text = (
         f"👋 Hello <b>{fname}</b>!\n\n"
         f"⚠️ <b>Security Verification Required</b>\n"
@@ -488,7 +484,7 @@ async def wd_approve(cb: CallbackQuery):
         await bot.send_message(
             wd["user_id"],
             "🎉 <b>Withdrawal Approved!</b>\n\n"
-            "Successful! Your withdrawal request has been completed. Please check your account."
+            "Your withdrawal request has been completed. Please check your account."
         )
     except Exception: pass
 
@@ -699,9 +695,9 @@ async def api_verify(request: Request):
     fingerprint= body.get("fingerprint", "")
     is_vpn     = body.get("isVpn", False)
     
-    # 📝 FIXED: Fallback to body direct data if Telegram signature verification fails on certain webviews
-    uid        = int(body.get("uid", 0))
-    ref_id     = int(body.get("refId", 0))
+    # 📝 403 ስህተትን ለመከላከል በየትኛውም ስም ቢላክ ፈልጎ እንዲያገኝ ተደርጓል
+    uid = int(body.get("uid") or body.get("userId") or body.get("user_id") or 0)
+    ref_id = int(body.get("refId") or body.get("ref_id") or body.get("referrer") or 0)
 
     tg_user = verify_telegram_initdata(init_data)
     if not tg_user and not uid:
@@ -734,7 +730,7 @@ async def api_verify(request: Request):
         except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "vpn"})
 
-    # 4. Multi-account detection (Fingerprint & IP)
+    # 4. Multi-account detection
     duplicate = await db.find_duplicate(ip, fingerprint, uid)
     if duplicate:
         await db.create_user(uid, uname, fname, None) 
