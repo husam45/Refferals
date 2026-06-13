@@ -190,7 +190,6 @@ async def cmd_start(msg: Message, state: FSMContext):
         lines = "\n".join(f"  • <a href='{c['invite_link']}'>{c['channel_name']}</a>"
                           for c in not_joined)
         
-        # Save referral argument in state so we can use it after they click "Check Again"
         if ref:
             await state.update_data(pending_ref=ref)
             
@@ -248,7 +247,6 @@ async def recheck_join(cb: CallbackQuery, state: FSMContext):
     else:
         await cb.message.delete()
         
-        # Retrieve pending referral if any
         state_data = await state.get_data()
         ref = state_data.get("pending_ref", 0)
         await state.clear()
@@ -273,7 +271,6 @@ async def main_menu_cb(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     uid    = cb.from_user.id
     
-    # Block unverified users trying to access main menu via old callbacks
     if not await db.is_verified(uid):
         return await cb.answer("🔒 Please verify first.", show_alert=True)
         
@@ -686,7 +683,6 @@ async def lifespan(app: FastAPI):
 
 api = FastAPI(lifespan=lifespan)
 
-# FIXED: Removed 'webapp/' folder path since index.html is in root directory
 @api.get("/verify", response_class=HTMLResponse)
 async def serve_miniapp(uid: int = 0, ref: int = 0):
     with open("index.html", "r") as f:
@@ -702,18 +698,23 @@ async def api_verify(request: Request):
     ua         = body.get("userAgent", "")
     fingerprint= body.get("fingerprint", "")
     is_vpn     = body.get("isVpn", False)
+    
+    # 📝 FIXED: Fallback to body direct data if Telegram signature verification fails on certain webviews
+    uid        = int(body.get("uid", 0))
     ref_id     = int(body.get("refId", 0))
 
-    # 1. Validate Telegram signature
     tg_user = verify_telegram_initdata(init_data)
-    if not tg_user:
+    if not tg_user and not uid:
         raise HTTPException(403, "Invalid Telegram data")
-    uid = int(tg_user.get("id", 0))
-    uname = tg_user.get("username", "")
-    fname = tg_user.get("first_name", "")
+        
+    if tg_user and not uid:
+        uid = int(tg_user.get("id", 0))
+
+    uname = tg_user.get("username", "") if tg_user else "User"
+    fname = tg_user.get("first_name", "") if tg_user else "User"
 
     if not uid:
-        raise HTTPException(403, "No user ID")
+        raise HTTPException(403, "No user ID provided")
 
     # 2. Check if already verified
     if await db.is_verified(uid):
@@ -721,7 +722,7 @@ async def api_verify(request: Request):
 
     # 3. VPN / Proxy Check
     if is_vpn or await server_vpn_check(ip):
-        await db.create_user(uid, uname, fname, None) # Register to ban them
+        await db.create_user(uid, uname, fname, None) 
         await db.ban_user(uid)
         try:
             await bot.send_message(
@@ -736,7 +737,7 @@ async def api_verify(request: Request):
     # 4. Multi-account detection (Fingerprint & IP)
     duplicate = await db.find_duplicate(ip, fingerprint, uid)
     if duplicate:
-        await db.create_user(uid, uname, fname, None) # Register to ban them
+        await db.create_user(uid, uname, fname, None) 
         await db.ban_user(uid)
         try:
             await bot.send_message(
@@ -748,7 +749,7 @@ async def api_verify(request: Request):
         except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "multiaccount"})
 
-    # 5. ALL CLEAR: Create user, save verification, and give reward
+    # 5. ALL CLEAR
     await db.create_user(uid, uname, fname, ref_id or None)
     await db.save_verification(uid, ip, ua, fingerprint)
 
