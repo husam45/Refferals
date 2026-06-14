@@ -517,7 +517,7 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         try:
             alias = f"@{user['username']}" if user['username'] else "Private Profile"
             post_text = (
-                f"⏳ <b>NEW WITHDRAWAL REQUEST LOGGED</b>\n\n"
+                f"⏳ <b>NEW WITHDRAWAL REQUESTED </b>\n\n"
                 f"👤 <b>User Node:</b> {s_data['validated_title']} ({alias})\n"
                 f"💰 <b>Requested Amount:</b> <code>ETB {s_data['validated_volume']:.2f}</code>\n"
                 f"📱 <b>Method:</b> <code>Telebirr Portal</code>\n"
@@ -556,7 +556,7 @@ async def process_admin_approval(callback: CallbackQuery):
             channel_text = (
                 f"✅ <b>PAYOUT SETTLEMENT COMPLETED SUCCESSFULLY</b>\n\n"
                 f"👤 <b>Recipient:</b> {ticket['full_name']}\n"
-                f"💰 <b>Settled Weight:</b> <code>ETB {ticket['amount']:.2f}</code>\n"
+                f"💰 <b>Amount :</b> <code>ETB {ticket['amount']:.2f}</code>\n"
                 f"🚀 <b>Operational Registry:</b> Verified Success ✅"
             )
             await bot.send_photo(chat_id=PAYMENT_LOG_CHANNEL, photo=TELEBIRR_PROOF_IMAGE, caption=channel_text, reply_to_message_id=ticket["channel_post_id"])
