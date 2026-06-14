@@ -47,8 +47,8 @@ PAYMENT_LOG_CH  = os.getenv("PAYMENT_LOG_CHANNEL", "")
 WEBAPP_URL      = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_KEY  = os.getenv("PROXYCHECK_API_KEY", "")
 
-# 🖼 የቴሌብር ፕሩፍ ፎቶ URL
-TELEBIRR_PROOF_IMAGE = os.getenv("https://i.postimg.cc/C5Q9k6Bz/IMG-20260614-035748-094.jpg", "https://i.imgur.com/8bX9K4m.jpg")
+# 📸 የቴሌብር ፕሩፍ ፎቶ (መጀመሪያ ሊንክ ነው፤ ቦቱ የሚሰጥህን File ID እዚህ ላይ መተካት ትችላለህ)
+TELEBIRR_PROOF_IMAGE = os.getenv("TELEBIRR_PROOF_IMAGE", "https://i.imgur.com/8bX9K4m.jpg")
 
 if WEBAPP_URL.startswith("tg56") or not WEBAPP_URL.startswith(("http://", "https://")):
     WEBAPP_URL = f"https://{WEBAPP_URL}"
@@ -72,11 +72,9 @@ class AdminState(StatesGroup):
     add_channel_name   = State()
     add_channel_link   = State()
     
-    # የባላንስ ማስተካከያ ስቴቶች
     edit_bal_uid       = State()
     edit_bal_amount    = State()
     
-    # የአድሚን ስቴቶች
     broadcast_msg      = State()
     search_user_id     = State()
     ban_user_id        = State()
@@ -198,9 +196,20 @@ def back_kb(target="main_menu") -> InlineKeyboardMarkup:
     ]])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Public Bot Commands & Interactive Endpoints
+# Public Bot Commands & Core Handlers
 # ─────────────────────────────────────────────────────────────────────────────
 router = Router()
+
+# ⚙️ የፎቶዎችን File ID አውቶማቲክ ማግኛ (አድሚኑ ፎቶ ሲልክ File ID ይሰጠዋል)
+@router.message(F.photo)
+async def get_any_photo_file_id(msg: Message):
+    if not is_admin(msg.from_user.id): return
+    file_id = msg.photo[-1].file_id
+    await msg.answer(
+        f"📸 <b>የፎቶው የቴሌግራም File ID ተገኝቷል!</b>\n\n"
+        f"ይህንን ኮድ ሙሉ በሙሉ ኮፒ አድርገው በ <code>TELEBIRR_PROOF_IMAGE</code> ቦታ ላይ ይተኩት፦\n\n"
+        f"<code>{file_id}</code>"
+    )
 
 @router.message(CommandStart())
 async def cmd_start(msg: Message, state: FSMContext):
@@ -297,7 +306,7 @@ async def show_reflink(cb: CallbackQuery):
     await cb.answer()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 💸 Withdrawal Flow & Telebirr Setup
+# 💸 Withdrawal Flow & Telebirr Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "withdraw")
 async def withdraw_start(cb: CallbackQuery, state: FSMContext):
@@ -427,7 +436,7 @@ async def wd_confirm(cb: CallbackQuery, state: FSMContext):
     await cb.answer("ጥያቄዎ ተመዝግቧል!")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Withdrawal Approval with Image Proof
+# Withdrawal Approval Engine (With Image / File ID support)
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("wd_approve_"))
 async def wd_approve(cb: CallbackQuery):
@@ -449,6 +458,7 @@ async def wd_approve(cb: CallbackQuery):
                 f"📅 ቀን : {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
                 f"🎉 እንኳን ደስ አሎት! በቦታችን ሰዎችን እየጋበዙ የእውነተኛ ክፍያ ባለቤት ይሁኑ።"
             )
+            # የቴሌግራም File ID ወይም ሊንክን በቀጥታ ይልካል (የሪጅን መቆለፍ ችግር የለበትም)
             await bot.send_photo(chat_id=PAYMENT_LOG_CH, photo=TELEBIRR_PROOF_IMAGE, caption=caption_text)
         except Exception as e:
             log.warning("Log channel photo error: %s", e)
@@ -457,7 +467,7 @@ async def wd_approve(cb: CallbackQuery):
         await bot.send_message(wd["user_id"], f"🎉 <b>የማውጫ ጥያቄዎ ጸድቋል!</b>\n\n{wd['amount']:.2f} Birr ወደ ቴሌብር አካውንትዎ ተልኳል። እባክዎ አካውንትዎን ይፈትሹ።")
     except Exception: pass
 
-    await cb.message.edit_text(cb.message.text + "\n\n✅ <b>APPROVED & POSTED WITH IMAGE PROOF</b>", reply_markup=None)
+    await cb.message.edit_text(cb.message.text + "\n\n✅ <b>APPROVED & POSTED WITH PROOF IMAGE</b>", reply_markup=None)
     await cb.answer("Approved ✅")
 
 @router.callback_query(F.data.startswith("wd_reject_"))
@@ -505,7 +515,6 @@ async def admin_edit_balance_uid(msg: Message, state: FSMContext):
     user = None
     target_id_int = None
     
-    # በUsername መፈለግ (በ @ ከጀመረ ወይም ፊደል ካለበት)
     if input_text.startswith("@") or not input_text.isdigit():
         username_clean = input_text.replace("@", "").strip()
         async with aiosqlite.connect(db.DB_PATH) as conn:
@@ -515,11 +524,9 @@ async def admin_edit_balance_uid(msg: Message, state: FSMContext):
             if user:
                 target_id_int = user["user_id"]
     else:
-        # በID መፈለግ
         target_id_int = int(input_text)
         user = await db.get_user(target_id_int)
 
-    # ተጠቃሚው ካልተገኘ
     if not user:
         return await msg.answer(
             f"❌ ተጠቃሚው '<b>{input_text}</b>' በዳታቤዝ ውስጥ አልተገኘም።\n"
@@ -534,7 +541,7 @@ async def admin_edit_balance_uid(msg: Message, state: FSMContext):
         f"username፦ @{user['username'] or 'የለውም'}\n"
         f"🆔 ID፦ <code>{user['user_id']}</code>\n"
         f"💰 የአሁኑ ባላንስ፦ <b>{user['balance']:.2f} Birr</b>\n\n"
-        f"ለመጨめる ፖዘቲቭ ቁጥር (ምሳሌ 100)፦\nለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -50) ያስገቡ፦"
+        f"ለመጨመር ፖዘቲቭ ቁጥር (ምሳሌ 100)፦\nለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -50) ያስገቡ፦"
     )
 
 @router.message(AdminState.edit_bal_amount)
@@ -548,7 +555,6 @@ async def admin_edit_balance_amount(msg: Message, state: FSMContext):
     data = await state.get_data()
     target_uid = data["target_uid"]
     
-    # ⚡ ባላንሱን በዳታቤዝ ላይ በቀጥታ ማዘመን (የCache ችግርን ይፈታል)
     async with aiosqlite.connect(db.DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
         cur = await conn.execute("SELECT balance, full_name FROM users WHERE user_id = ?", (target_uid,))
@@ -566,7 +572,6 @@ async def admin_edit_balance_amount(msg: Message, state: FSMContext):
         
     await state.clear()
     
-    # ለአድሚኑ ማረጋገጫ መስጠት
     await msg.answer(
         f"✅ ባላንስ በተሳካ ሁኔታ ተስተካክሏል!\n\n"
         f"👤 ተጠቃሚ፦ <b>{user_row['full_name']}</b>\n"
@@ -576,7 +581,6 @@ async def admin_edit_balance_amount(msg: Message, state: FSMContext):
         reply_markup=admin_panel_kb()
     )
     
-    # 🔥 ለተጠቃሚው በቦቱ በኩል ፈጣን ማሳወቂያ መላክ
     try:
         if amount > 0:
             notification_text = (
@@ -845,6 +849,7 @@ async def admin_pending_wd(cb: CallbackQuery):
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log.info("Initializing database...")
     await db.init_db()
     asyncio.create_task(start_bot())
     yield
