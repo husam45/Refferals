@@ -395,7 +395,7 @@ def generate_admin_dashboard() -> InlineKeyboardMarkup:
     ])
 
 def generate_fallback_navigation(target_callback="ui_return_home") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Back", callback_data=target_callback)]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Back / ተመለስ", callback_data=target_callback)]])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # USER EXPERIENCE OVERVIEW HANDLERS (Telegram Endpoint Logic)
@@ -434,7 +434,6 @@ async def process_start_command(message: Message, state: FSMContext):
     if await DataEngine.check_device_status(caller_id):
         return await message.answer("✅ <b>Welcome back!</b> Access granted to your interactive control panel dashboard.", reply_markup=generate_dashboard_matrix(caller_id))
     
-    # Send rules automatically if channels are already cleared
     await message.answer(
         f"{BOT_RULES_CAPTION}\n\n"
         "🔐 <b>Next Step:</b> Please proceed to verify your device signature using the Mini App widget below:", 
@@ -457,7 +456,6 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
         if await DataEngine.check_device_status(caller_id):
             await callback.message.answer("✅ Device identity clear. Access granted!", reply_markup=generate_dashboard_matrix(caller_id))
         else:
-            # Displaying professional system terms immediately after channel validation pass
             await callback.message.answer(
                 f"{BOT_RULES_CAPTION}\n\n"
                 "🔐 <b>Final Attestation Step:</b> Click the button below to launch our secure verification engine via Mini App:", 
@@ -518,7 +516,7 @@ async def process_withdrawal_pipeline_start(callback: CallbackQuery, state: FSMC
     
     navigation_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📲 Telebirr / ቴሌብር", callback_data="gateway_telebirr")],
-        [InlineKeyboardButton(text="❌ Cancel Operation", callback_data="ui_return_home")]
+        [InlineKeyboardButton(text="❌ Cancel Operation / ሰርዝ", callback_data="ui_return_home")]
     ])
     await callback.message.edit_text("💸 <b>Select Payout Endpoint / የማውጫ መንገድ ይምረጡ፦</b>", reply_markup=navigation_markup)
 
@@ -571,7 +569,7 @@ async def process_account_title_input(message: Message, state: FSMContext):
     
     navigation_markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Transact Payout", callback_data="action_payout_dispatch"),
-        InlineKeyboardButton(text="❌ Abort Matrix", callback_data="ui_return_home")
+        InlineKeyboardButton(text="❌ Abort Matrix / ሰርዝ", callback_data="ui_return_home")
     ]])
     await message.answer(confirmation_template, reply_markup=navigation_markup)
     await state.set_state(UserWithdrawalWorkflow.payout_final_approval)
@@ -596,17 +594,17 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
     await DataEngine.modify_balance(caller_id, -session_variables["validated_volume"])
     await state.clear()
 
+    # INSTANT LOGGING TO PUBLIC CHANNEL NODE
     channeled_post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
             account_alias = f"@{user_live_profile['username']}" if user_live_profile.get('username') else "Private Profile"
             broadcast_notification_text = (
-                f"✅ <b>NEW PAYOUT TRANSACTION REQUESTED</b>\n\n"
-                f"👤 <b>Claimant Node:</b> {session_variables['validated_title']} ({account_alias})\n"
-                f"🆔 <b>Node Passport:</b> <code>{caller_id}</code>\n\n"
-                f"💰 <b>Dispatched Resource:</b> <code>ETB {session_variables['validated_volume']:.2f}</code>\n"
-                f"📱 <b>Payment Infrastructure:</b> <code>Telebirr API Portal</code>\n"
-                f"📝 <b>Routing Footprint:</b> {session_variables['validated_title']} - {session_variables['validated_phone']}\n\n"
+                f"⏳ <b>NEW WITHDRAWAL REQUEST LOGGED</b>\n\n"
+                f"👤 <b>User Node:</b> {session_variables['validated_title']} ({account_alias})\n"
+                f"💰 <b>Requested Amount:</b> <code>ETB {session_variables['validated_volume']:.2f}</code>\n"
+                f"📱 <b>Method:</b> <code>Telebirr Portal</code>\n"
+                f"📊 <b>Status:</b> <code>Pending Verification ⏳</code>\n\n"
                 f"⏰ <b>Timestamp:</b> <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>"
             )
             broadcast_receipt = await bot.send_message(chat_id=PAYMENT_LOG_CHANNEL, text=broadcast_notification_text)
@@ -630,7 +628,15 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
         except Exception:
             pass
 
-    await callback.message.edit_text("📨 <b>Transaction Logged:</b> Settlement parameters queued for review. Status updates will be piped to the official channel.")
+    # PROFESSIONAL TIME RESPONSE MATRIX (2 to 48 Hours Allocation)
+    user_success_response = (
+        "📨 <b>Withdrawal Request Submitted Successfully!</b>\n\n"
+        "Your transaction has been securely queued in our ecosystem. "
+        "Our financial administration team will review and audit your referral logs shortly.\n\n"
+        "⏳ <b>Estimated Processing Time:</b> <code>Within 2 to 48 Hours</code>\n\n"
+        "<i>Thank you for your patience! Updates will be automatically tracked in the official channel log.</i>"
+    )
+    await callback.message.edit_text(user_success_response, reply_markup=generate_dashboard_matrix(caller_id))
 
 @core_router.callback_query(F.data.startswith("adm_payout_ap_"))
 async def process_admin_ticket_approval(callback: CallbackQuery):
@@ -846,7 +852,7 @@ async def process_admin_broadcast_execute(message: Message, state: FSMContext):
         try:
             await bot.send_message(chat_id=node["user_id"], text=broadcast_message_string)
             success_dispatch_counter += 1
-            await asyncio.sleep(0.04) # Prevent flooding
+            await asyncio.sleep(0.04)
         except Exception:
             pass
             
