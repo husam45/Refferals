@@ -1,7 +1,7 @@
 """
 bot.py – Telegram Referral Bot (Fully Featured & Comprehensive Edition)
 Flow: /start → Force Join Check → Mini App Verification → Reward & Unlock
-Features: Telebirr Integration, Advanced Admin Panel, Auto-Fix User Balance Editor, Broadcast, Ban System, Stats
+Features: Telebirr Integration, Advanced Admin Panel, Auto-Fix User Balance Editor (ID & Username), Broadcast, Ban System, Stats
 """
 import os
 import asyncio
@@ -475,7 +475,7 @@ async def wd_reject(cb: CallbackQuery):
     await cb.answer("Rejected ❌")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🛠 Advanced Admin Panel Engine & Auto-Fix User Balance Editor
+# 🛠 Advanced Admin Panel Engine (ID & Username Support)
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin_panel")
 async def admin_panel_callback(cb: CallbackQuery, state: FSMContext):
@@ -490,31 +490,51 @@ async def admin_panel_callback(cb: CallbackQuery, state: FSMContext):
 async def admin_edit_balance_start(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return await cb.answer("⛔", show_alert=True)
     await state.set_state(AdminState.edit_bal_uid)
-    await cb.message.edit_text("✍️ <b>User Balance Editor</b>\n\nእባክዎ ባላንስ ማስተካከል የሚፈልጉትን የተጠቃሚ <b>Telegram ID</b> ያስገቡ፦", reply_markup=back_kb("admin_panel"))
+    await cb.message.edit_text(
+        "✍️ <b>User Balance Editor</b>\n\n"
+        "እባክዎ ባላንስ ማስተካከል የሚፈልጉትን ተጠቃሚ <b>Telegram ID</b> ወይም <b>Username (@...)</b> ያስገቡ፦", 
+        reply_markup=back_kb("admin_panel")
+    )
     await cb.answer()
 
 @router.message(AdminState.edit_bal_uid)
 async def admin_edit_balance_uid(msg: Message, state: FSMContext):
     if not is_admin(msg.from_user.id): return
-    target_uid = msg.text.strip()
-    if not target_uid.isdigit():
-        return await msg.answer("❌ እባክዎ ትክክለኛ የቁጥር ID ያስገቡ።")
+    input_text = msg.text.strip()
     
-    target_id_int = int(target_uid)
-    user = await db.get_user(target_id_int)
+    user = None
+    target_id_int = None
     
-    # ✨ ማስተካከያ፦ ተጠቃሚው በዳታቤዝ ውስጥ ከሌለ በራሱ ጊዜ በቁጥሩ ይመዘግበዋል (የ"አልተገኘም" ስህተትን ይፈታል)
-    if not user:
-        await db.create_user(user_id=target_id_int, username="Manual_Add", full_name="👤 Manual User", referred_by=None)
+    # በUsername መፈለግ (በ @ ከጀመረ ወይም ፊደል ካለበት)
+    if input_text.startswith("@") or not input_text.isdigit():
+        username_clean = input_text.replace("@", "").strip()
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute("SELECT * FROM users WHERE LOWER(username) = LOWER(?)", (username_clean,))
+            user = await cur.fetchone()
+            if user:
+                target_id_int = user["user_id"]
+    else:
+        # በID መፈለግ
+        target_id_int = int(input_text)
         user = await db.get_user(target_id_int)
+
+    # ተጠቃሚው ካልተገኘ
+    if not user:
+        return await msg.answer(
+            f"❌ ተጠቃሚው '<b>{input_text}</b>' በዳታቤዝ ውስጥ አልተገኘም።\n"
+            f"እባክዎ ተጠቃሚው መጀመሪያ ቦቱን መጀመሩን ያረጋግጡ ወይም ትክክለኛ ID/Username ያስገቡ።"
+        )
         
     await state.update_data(target_uid=target_id_int)
     await state.set_state(AdminState.edit_bal_amount)
+    
     await msg.answer(
         f"👤 ተጠቃሚ፦ <b>{user['full_name']}</b>\n"
+        f"username፦ @{user['username'] or 'የለውም'}\n"
         f"🆔 ID፦ <code>{user['user_id']}</code>\n"
         f"💰 የአሁኑ ባላንስ፦ <b>{user['balance']:.2f} Birr</b>\n\n"
-        f"ለመጨመር ፖዘቲቭ ቁጥር (ምሳሌ 100)፣ ለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -50) ያስገቡ፦"
+        f"ለመጨめる ፖዘቲቭ ቁጥር (ምሳሌ 100)፦\nለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -50) ያስገቡ፦"
     )
 
 @router.message(AdminState.edit_bal_amount)
@@ -528,18 +548,52 @@ async def admin_edit_balance_amount(msg: Message, state: FSMContext):
     data = await state.get_data()
     target_uid = data["target_uid"]
     
-    await db.add_balance(target_uid, amount)
-    updated_user = await db.get_user(target_uid)
+    # ⚡ ባላንሱን በዳታቤዝ ላይ በቀጥታ ማዘመን (የCache ችግርን ይፈታል)
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute("SELECT balance, full_name FROM users WHERE user_id = ?", (target_uid,))
+        user_row = await cur.fetchone()
+        
+        if not user_row:
+            await state.clear()
+            return await msg.answer("❌ ስህተት አጋጥሟል፤ ተጠቃሚው ሊገኝ አልቻለም።")
+            
+        old_balance = user_row["balance"] or 0.0
+        new_balance = old_balance + amount
+        
+        await conn.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, target_uid))
+        await conn.commit()
+        
     await state.clear()
     
-    await msg.answer(f"✅ ባላንስ በተሳካ ሁኔታ ተስተካክሏል!\n\n👤 ተጠቃሚ፦ <b>{updated_user['full_name']}</b>\n💰 አዲስ ባላንስ፦ <b>{updated_user['balance']:.2f} Birr</b>", reply_markup=admin_panel_kb())
+    # ለአድሚኑ ማረጋገጫ መስጠት
+    await msg.answer(
+        f"✅ ባላንስ በተሳካ ሁኔታ ተስተካክሏል!\n\n"
+        f"👤 ተጠቃሚ፦ <b>{user_row['full_name']}</b>\n"
+        f"💰 የነበረው ባላንስ፦ <b>{old_balance:.2f} Birr</b>\n"
+        f"➕ የተደረገው ለውጥ፦ <b>{amount:+.2f} Birr</b>\n"
+        f"💎 አዲስ ባላንስ፦ <b>{new_balance:.2f} Birr</b>", 
+        reply_markup=admin_panel_kb()
+    )
     
+    # 🔥 ለተጠቃሚው በቦቱ በኩል ፈጣን ማሳወቂያ መላክ
     try:
         if amount > 0:
-            await bot.send_message(target_uid, f"💰 <b>+{amount:.2f} Birr</b> በአድሚን ወደ አካውንትዎ ተጨምሯል!\nየአሁኑ ባላንስዎ፦ <b>{updated_user['balance']:.2f} Birr</b>")
+            notification_text = (
+                f"🎉 <b>አዲስ ባላንስ ተጨምሮልዎታል!</b>\n\n"
+                f"💰 የተጨመረው መጠን፦ <b>+{amount:.2f} Birr</b>\n"
+                f"💎 የአሁኑ ጠቅላላ ባላንስዎ፦ <b>{new_balance:.2f} Birr</b>"
+            )
         else:
-            await bot.send_message(target_uid, f"📉 <b>{amount:.2f} Birr</b> በአድሚን ከአካውንትዎ ተቀንሷል!\nየአሁኑ ባላንስዎ፦ <b>{updated_user['balance']:.2f} Birr</b>")
-    except Exception: pass
+            notification_text = (
+                f"📉 <b>ከባላንስዎ ላይ ተቀንሷል!</b>\n\n"
+                f"💰 የተቀነሰው መጠን፦ <b>{amount:.2f} Birr</b>\n"
+                f"💎 የአሁኑ ጠቅላላ ባላንስዎ፦ <b>{new_balance:.2f} Birr</b>"
+            )
+        
+        await bot.send_message(chat_id=target_uid, text=notification_text)
+    except Exception as e:
+        log.warning(f"ለተጠቃሚው {target_uid} ማሳወቂያ መላክ አልተቻለም: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 📊 Statistics, Broadcast & Search Engine
