@@ -48,7 +48,7 @@ WEBAPP_URL      = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_KEY  = os.getenv("PROXYCHECK_API_KEY", "")
 
 # 🖼 የቴሌብር ፕሩፍ ፎቶ URL
-TELEBIRR_PROOF_IMAGE = os.getenv("TELEBIRR_PROOF_IMAGE", "https://i.imgur.com/8bX9K4m.jpg")
+TELEBIRR_PROOF_IMAGE = os.getenv("https://i.postimg.cc/C5Q9k6Bz/IMG-20260614-035748-094.jpg", "https://i.imgur.com/8bX9K4m.jpg")
 
 if WEBAPP_URL.startswith("tg56") or not WEBAPP_URL.startswith(("http://", "https://")):
     WEBAPP_URL = f"https://{WEBAPP_URL}"
