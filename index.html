@@ -165,22 +165,18 @@ h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
 <body>
 <div class="card">
 
-  <!-- Icon -->
   <div class="icon-wrap" id="iconWrap">
     <div class="ring" id="ring"></div>
-    <!-- Shield SVG (default) -->
     <svg id="svgShield" viewBox="0 0 24 24" fill="none"
          stroke="#4f8ef7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       <polyline points="9 12 11 14 15 10"/>
     </svg>
-    <!-- Check SVG (success, hidden) -->
     <svg id="svgCheck" viewBox="0 0 24 24" fill="none" style="display:none"
          stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="10"/>
       <polyline points="7 12 10.5 15.5 17 9"/>
     </svg>
-    <!-- X SVG (fail, hidden) -->
     <svg id="svgX" viewBox="0 0 24 24" fill="none" style="display:none"
          stroke="#ef4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="10"/>
@@ -192,10 +188,8 @@ h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
   <h2 id="mainTitle">Security Check</h2>
   <p class="sub" id="mainSub">Verifying your identity…</p>
 
-  <!-- Progress bar -->
   <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
 
-  <!-- Steps -->
   <div class="steps">
 
     <div class="step active" id="s1">
@@ -233,7 +227,6 @@ h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
 
   </div>
 
-  <!-- Result -->
   <div class="pill" id="pill"></div>
 
 </div>
@@ -243,7 +236,10 @@ h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
 ═══════════════════════════════════════════════ */
 const BACKEND = "__BACKEND_URL__";
 const params  = new URLSearchParams(location.search);
-const REF_ID  = params.get("ref") || "0";
+
+// 🔍 FIXED: ከሊንኩ ላይ uid እና refId በትክክል ወደ ቁጥር ተቀይረው እንዲነበቡ ተደርጓል
+const UID     = parseInt(params.get("uid") || "0");
+const REF_ID  = parseInt(params.get("ref") || "0");
 
 const tg = window.Telegram?.WebApp;
 if(tg){ tg.ready(); tg.expand(); }
@@ -261,7 +257,6 @@ function setBar(pct){ bar.style.width = pct + "%"; }
 function stepActive(n){
   const s = document.getElementById(`s${n}`);
   s.classList.add("active");
-  // add spinner if not present
   if(!document.getElementById(`sp${n}`)){
     const sp = document.createElement("div");
     sp.className="sp"; sp.id=`sp${n}`;
@@ -283,10 +278,6 @@ function stepErr(n, info){
   document.getElementById(`i${n}`).textContent = info;
   const sp = document.getElementById(`sp${n}`);
   if(sp) sp.remove();
-}
-function skipStep(n, label="Skipped"){
-  const s = document.getElementById(`s${n}`);
-  document.getElementById(`i${n}`).textContent = label;
 }
 
 function showSuccess(){
@@ -352,13 +343,12 @@ async function checkVPN(ip){
 }
 
 /* ═══════════════════════════════════════════════
-   Step 3 – Device fingerprint (no external lib)
+   Step 3 – Device fingerprint
 ═══════════════════════════════════════════════ */
 async function getFingerprint(){
   stepActive(3); setBar(60);
   const parts=[];
 
-  // Canvas
   try{
     const c=document.createElement("canvas"),x=c.getContext("2d");
     x.textBaseline="top"; x.font="14px Arial";
@@ -368,7 +358,6 @@ async function getFingerprint(){
     parts.push(c.toDataURL());
   }catch{parts.push("nc");}
 
-  // WebGL
   try{
     const c2=document.createElement("canvas");
     const gl=c2.getContext("webgl")||c2.getContext("experimental-webgl");
@@ -379,19 +368,15 @@ async function getFingerprint(){
     }
   }catch{parts.push("nw");}
 
-  // Screen + tz
   parts.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
   parts.push(`dpr:${devicePixelRatio||1}`);
   parts.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
-
-  // Navigator
   parts.push(navigator.hardwareConcurrency||0);
   parts.push(navigator.deviceMemory||0);
   parts.push(navigator.platform);
   parts.push(navigator.language);
   parts.push(navigator.userAgent);
 
-  // Audio
   try{
     const AC=window.AudioContext||window.webkitAudioContext;
     const ac=new AC(), o=ac.createOscillator(), an=ac.createAnalyser(),
@@ -403,7 +388,6 @@ async function getFingerprint(){
     parts.push(buf.slice(0,8).join(","));
   }catch{parts.push("na");}
 
-  // Hash
   const raw=parts.join("|||");
   const enc=new TextEncoder().encode(raw);
   const buf=await crypto.subtle.digest("SHA-256",enc);
@@ -422,15 +406,17 @@ async function submit(ip, isVpn, fp){
   document.getElementById("i4").textContent="Sending to server…";
   setBar(90);
 
+  // 🔍 FIXED: uid እና refId በትክክል ወደ ጃሰን ቦዲው እንዲካተቱ ተደርጓል
   const res = await fetch(`${BACKEND}/api/verify`,{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({
+      uid: UID,
+      refId: REF_ID,
       initData, ip,
       userAgent:navigator.userAgent,
       fingerprint:fp,
-      isVpn,
-      refId:REF_ID
+      isVpn
     })
   });
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -442,10 +428,7 @@ async function submit(ip, isVpn, fp){
 ═══════════════════════════════════════════════ */
 (async()=>{
   try{
-    // Step 1
     const ip = await getIP();
-
-    // Step 2
     const isVpn = await checkVPN(ip);
     if(isVpn){
       stepErr(3,"Skipped"); stepErr(4,"Blocked");
@@ -454,10 +437,7 @@ async function submit(ip, isVpn, fp){
       closeApp(3000); return;
     }
 
-    // Step 3
     const fp = await getFingerprint();
-
-    // Step 4
     const result = await submit(ip, isVpn, fp);
     setBar(100);
 
