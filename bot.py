@@ -60,7 +60,10 @@ logger = logging.getLogger("ReferralBotSystem")
 # ─────────────────────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip()]
-PAYMENT_LOG_CHANNEL = os.getenv("PAYMENT_LOG_CHANNEL", "")
+
+# @Hfearningproof የሚለውን ሊንክ በቀጥታ በጽሑፍ (String) እንዲቀበል ተደርጓል
+PAYMENT_LOG_CHANNEL = os.getenv("PAYMENT_LOG_CHANNEL", "").strip()
+
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_API_KEY = os.getenv("PROXYCHECK_API_KEY", "")
 DATABASE_FILENAME = "bot_production_core.db"
@@ -386,7 +389,7 @@ def generate_admin_dashboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💎 Set Referral Reward", callback_data="adm_cmd_reward"), InlineKeyboardButton(text="💵 Set Min Withdrawal", callback_data="adm_cmd_min_wd")],
         [InlineKeyboardButton(text="✍️ Edit User Balance", callback_data="adm_cmd_edit_bal"), InlineKeyboardButton(text="📊 Bot Statistics", callback_data="adm_cmd_stats")],
-        [InlineKeyboardButton(text="🔴 Add Force Channel", callback_data="adm_cmd_add_mand"), InlineKeyboardButton(text="🟢 Add Optional Channel", callback_data="adm_cmd_add_sneaky")],
+        [InlineKeyboardButton(text="🔴 Add Force Channel", callback_data="adm_cmd_add_mand")],
         [InlineKeyboardButton(text="🗑 Remove Channel", callback_data="adm_cmd_rm_node"), InlineKeyboardButton(text="📋 List Channels", callback_data="adm_cmd_list_nodes")],
         [InlineKeyboardButton(text="📥 Pending Withdrawals", callback_data="adm_cmd_pending_tickets"), InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_cmd_broadcast")],
         [InlineKeyboardButton(text="🔍 Search User Info", callback_data="adm_cmd_search")],
@@ -594,7 +597,7 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
     await DataEngine.modify_balance(caller_id, -session_variables["validated_volume"])
     await state.clear()
 
-    # INSTANT LOGGING TO PUBLIC CHANNEL NODE
+    # INSTANT LOGGING TO PUBLIC CHANNEL NODE (FIXED: STRING CHAT_ID COMPATIBLE)
     channeled_post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
@@ -736,35 +739,6 @@ async def process_admin_add_mandatory_finalize(message: Message, state: FSMConte
         )
         await conn.commit()
     await message.answer("🔴 <b>Target Node Registered:</b> Compulsory join rule locked successfully.", reply_markup=generate_admin_dashboard())
-
-@core_router.callback_query(F.data == "adm_cmd_add_sneaky")
-async def process_admin_add_sneaky_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminConsoleWorkflow.append_sneaky_id)
-    await callback.message.edit_text("🟢 <b>Enter Optional Sneaky Channel ID (-100...):</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
-
-@core_router.message(AdminConsoleWorkflow.append_sneaky_id)
-async def process_admin_add_sneaky_id(message: Message, state: FSMContext):
-    await state.update_data(sn_id=message.text.strip())
-    await state.set_state(AdminConsoleWorkflow.append_sneaky_title)
-    await message.answer("<b>Enter Optional Channel Title:</b>")
-
-@core_router.message(AdminConsoleWorkflow.append_sneaky_title)
-async def process_admin_add_sneaky_title(message: Message, state: FSMContext):
-    await state.update_data(sn_title=message.text.strip())
-    await state.set_state(AdminConsoleWorkflow.append_sneaky_url)
-    await message.answer("<b>Enter Network Invite Link:</b>")
-
-@core_router.message(AdminConsoleWorkflow.append_sneaky_url)
-async def process_admin_add_sneaky_finalize(message: Message, state: FSMContext):
-    session_data = await state.get_data()
-    await state.clear()
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        await conn.execute(
-            "INSERT INTO marketing_channels (channel_id, channel_name, invite_link, is_optional) VALUES (?, ?, ?, 1)",
-            (session_data["sn_id"], session_data["sn_title"], message.text.strip())
-        )
-        await conn.commit()
-    await message.answer("🟢 <b>Sneaky Mode Activated:</b> Optional channel linked safely without validation dependency.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_list_nodes")
 async def process_admin_channel_listing(callback: CallbackQuery):
