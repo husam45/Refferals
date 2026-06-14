@@ -324,6 +324,23 @@ async def inspect_compulsory_memberships(user_id: int) -> list:
             unmatched_nodes.append(node)
     return unmatched_nodes
 
+async def enforce_membership_gate(event, user_id: int) -> bool:
+    unjoined = await inspect_compulsory_memberships(user_id)
+    if unjoined:
+        keyboard = []
+        for ch in await DataEngine.get_force_channels():
+            keyboard.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch['invite_link'])])
+        keyboard.append([InlineKeyboardButton(text="✅ Joined — Verify Status", callback_data="ui_revalidate_channels")])
+        
+        msg_text = "⚠️ <b>Action Required:</b> You have left our mandatory channel(s). Please rejoin to continue using the bot:"
+        if isinstance(event, Message):
+            await event.answer(msg_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+        elif isinstance(event, CallbackQuery):
+            await event.message.answer(msg_text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+            await event.answer()
+        return False
+    return True
+
 async def execute_network_vpn_lookup(client_ip: str) -> bool:
     if not client_ip or client_ip in ("127.0.0.1", "::1", "unknown"):
         return False
@@ -339,8 +356,8 @@ async def execute_network_vpn_lookup(client_ip: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # UI INTERACTIVE INTERFACES
 # ─────────────────────────────────────────────────────────────────────────────
-def generate_verification_widget(user_id: int, target_referrer: int) -> InlineKeyboardMarkup:
-    url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={target_referrer}"
+def generate_verification_widget(user_id: int, target_referrer: int, msg_id: int = 0) -> InlineKeyboardMarkup:
+    url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={target_referrer}&msg_id={msg_id}"
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔐 Open Mini App & Verify", web_app=WebAppInfo(url=url))]])
 
 def generate_dashboard_matrix(user_id: int) -> InlineKeyboardMarkup:
@@ -381,20 +398,17 @@ async def process_start_command(message: Message, state: FSMContext):
     if account and account["is_banned"]:
         return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted.")
 
-    unjoined = await inspect_compulsory_memberships(caller_id)
-    if unjoined:
+    if not await enforce_membership_gate(message, caller_id):
         if validated_referrer:
             await state.update_data(stashed_referrer_id=validated_referrer)
-        keyboard = []
-        for ch in await DataEngine.get_force_channels():
-            keyboard.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch['invite_link'])])
-        keyboard.append([InlineKeyboardButton(text="✅ Joined — Verify Status", callback_data="ui_revalidate_channels")])
-        return await message.answer("👋 <b>Welcome!</b> Please join our channels below to unlock the bot system:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+        return
 
     if await DataEngine.is_verified(caller_id):
         return await message.answer("✅ <b>Welcome back!</b> Access granted.", reply_markup=generate_dashboard_matrix(caller_id))
     
-    await message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Next Step:</b> Verify your identity via Mini App:", reply_markup=generate_verification_widget(caller_id, validated_referrer))
+    sent_msg = await message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Next Step:</b> Verify your identity via Mini App:", 
+                                    reply_markup=generate_verification_widget(caller_id, validated_referrer, 0))
+    await sent_msg.edit_reply_markup(reply_markup=generate_verification_widget(caller_id, validated_referrer, sent_msg.message_id))
 
 @core_router.callback_query(F.data == "ui_revalidate_channels")
 async def process_channel_revalidation(callback: CallbackQuery, state: FSMContext):
@@ -403,22 +417,28 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
     if unjoined:
         await callback.answer("❌ Membership verification failed. Join all channels first.", show_alert=True)
     else:
-        await callback.message.delete()
+        try:
+            await callback.message.delete()
+        except Exception: pass
         s_data = await state.get_data()
         ref = s_data.get("stashed_referrer_id", 0)
         await state.clear()
         if await DataEngine.is_verified(caller_id):
             await callback.message.answer("✅ Identity clear!", reply_markup=generate_dashboard_matrix(caller_id))
         else:
-            await callback.message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Attestation Step:</b> launch Mini App verification:", reply_markup=generate_verification_widget(caller_id, ref))
+            sent_msg = await callback.message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Attestation Step:</b> launch Mini App verification:", 
+                                                     reply_markup=generate_verification_widget(caller_id, ref, 0))
+            await sent_msg.edit_reply_markup(reply_markup=generate_verification_widget(caller_id, ref, sent_msg.message_id))
 
 @core_router.callback_query(F.data == "ui_return_home")
 async def process_navigation_home(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    if not await enforce_membership_gate(callback, callback.from_user.id): return
     await callback.message.edit_text("🏠 <b>Main Dashboard Menu / ዋና ማውጫ</b>", reply_markup=generate_dashboard_matrix(callback.from_user.id))
 
 @core_router.callback_query(F.data == "ui_fetch_balance")
 async def process_balance_query(callback: CallbackQuery):
+    if not await enforce_membership_gate(callback, callback.from_user.id): return
     acc = await DataEngine.get_user(callback.from_user.id)
     min_l = await DataEngine.get_setting("min_withdrawal", "50")
     text = f"💰 <b>Your Available Balance:</b>\n\n• Assets: <code>{acc['balance']:.2f} Birr</code>\n• Minimum Withdrawal: <code>{min_l} Birr</code>"
@@ -426,12 +446,14 @@ async def process_balance_query(callback: CallbackQuery):
 
 @core_router.callback_query(F.data == "ui_fetch_referrals")
 async def process_referral_query(callback: CallbackQuery):
+    if not await enforce_membership_gate(callback, callback.from_user.id): return
     cnt = await DataEngine.get_referral_count(callback.from_user.id)
     rate = float(await DataEngine.get_setting("reward_per_referral", "10"))
     await callback.message.edit_text(f"👥 <b>Your Referral Network:</b>\n\n• Total Referrals: <b>{cnt} users</b>\n• Net Profits: <b>{cnt*rate:.2f} Birr</b>", reply_markup=generate_fallback_navigation())
 
 @core_router.callback_query(F.data == "ui_fetch_link")
 async def process_link_generation(callback: CallbackQuery):
+    if not await enforce_membership_gate(callback, callback.from_user.id): return
     me = await bot.get_me()
     await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
@@ -440,6 +462,7 @@ async def process_link_generation(callback: CallbackQuery):
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
 async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
+    if not await enforce_membership_gate(callback, callback.from_user.id): return
     user = await DataEngine.get_user(callback.from_user.id)
     min_w = float(await DataEngine.get_setting("min_withdrawal", "50"))
     if user["balance"] < min_w:
@@ -517,7 +540,7 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         try:
             alias = f"@{user['username']}" if user['username'] else "Private Profile"
             post_text = (
-                f"⏳ <b>NEW WITHDRAWAL REQUESTED </b>\n\n"
+                f"⏳ <b>NEW WITHDRAWAL REQUEST</b>\n\n"
                 f"👤 <b>User Node:</b> {s_data['validated_title']} ({alias})\n"
                 f"💰 <b>Requested Amount:</b> <code>ETB {s_data['validated_volume']:.2f}</code>\n"
                 f"📱 <b>Method:</b> <code>Telebirr Portal</code>\n"
@@ -530,15 +553,26 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.error(f"Channel Broadcast Error: {e}")
 
+    alias_str = f"@{user['username']}" if user['username'] else "None"
+    admin_text = (
+        f"📥 <b>Incoming Ticket #{ticket_id}</b>\n\n"
+        f"👤 <b>Name:</b> {s_data['validated_title']}\n"
+        f"🆔 <b>User ID:</b> <code>{caller_id}</code>\n"
+        f"🏷 <b>Username:</b> {alias_str}\n"
+        f"💰 <b>Amount:</b> <b>{s_data['validated_volume']:.2f} Birr</b>\n"
+        f"📱 <b>Phone:</b> <code>{s_data['validated_phone']}</code>"
+    )
+
     admin_markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Approve Ticket", callback_data=f"adm_payout_ap_{ticket_id}"),
         InlineKeyboardButton(text="❌ Deny Ticket", callback_data=f"adm_payout_rj_{ticket_id}")
     ]])
+    
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(chat_id=admin_id, text=f"📥 <b>Incoming Ticket #{ticket_id}</b>\nVolume: <b>{s_data['validated_volume']:.2f} Birr</b>", reply_markup=admin_markup)
-        except Exception:
-            pass
+            await bot.send_message(chat_id=admin_id, text=admin_text, reply_markup=admin_markup)
+        except Exception as e:
+            logger.error(f"Failed sending ticket to admin {admin_id}: {e}")
 
     await callback.message.edit_text("📨 <b>Withdrawal Submitted!</b> Processing inside 2-48 hours. Updates are sent to our log channel.", reply_markup=generate_dashboard_matrix(caller_id))
 
@@ -556,7 +590,7 @@ async def process_admin_approval(callback: CallbackQuery):
             channel_text = (
                 f"✅ <b>PAYOUT SETTLEMENT COMPLETED SUCCESSFULLY</b>\n\n"
                 f"👤 <b>Recipient:</b> {ticket['full_name']}\n"
-                f"💰 <b>Amount :</b> <code>ETB {ticket['amount']:.2f}</code>\n"
+                f"💰 <b>Amount:</b> <code>ETB {ticket['amount']:.2f}</code>\n"
                 f"🚀 <b>Operational Registry:</b> Verified Success ✅"
             )
             await bot.send_photo(chat_id=PAYMENT_LOG_CHANNEL, photo=TELEBIRR_PROOF_IMAGE, caption=channel_text, reply_to_message_id=ticket["channel_post_id"])
@@ -761,7 +795,7 @@ api_platform.add_middleware(
 )
 
 @api_platform.get("/verify", response_class=HTMLResponse)
-async def serve_frontend(uid: int = 0, ref: int = 0):
+async def serve_frontend(uid: int = 0, ref: int = 0, msg_id: int = 0):
     try:
         with open("index.html", "r") as storage_file:
             loaded_html = storage_file.read()
@@ -777,6 +811,7 @@ async def execute_verification(request: Request):
         
     client_id = int(tg_user["id"])
     ref_id = int(incoming.get("refId") or 0)
+    msg_id = int(incoming.get("msgId") or 0)
 
     if await DataEngine.is_verified(client_id):
         return JSONResponse({"status": "already_verified"})
@@ -788,6 +823,13 @@ async def execute_verification(request: Request):
         await DataEngine.create_user(client_id, tg_user.get("username", ""), tg_user.get("first_name", ""))
         await DataEngine.ban_user(client_id, 1)
         return JSONResponse({"status": "blocked"})
+
+    # ማረጋገጫው ሲሳካ የድሮውን ሊንክ የያዘውን መልእክት ወዲያውኑ በፍጥነት ያጠፋል
+    if msg_id > 0:
+        try:
+            await bot.delete_message(chat_id=client_id, message_id=msg_id)
+        except Exception as e:
+            logger.error(f"Failed to delete verification message: {e}")
 
     await DataEngine.create_user(client_id, tg_user.get("username", ""), tg_user.get("first_name", ""), ref_id or None)
     await DataEngine.save_verification(client_id, incoming.get("ip", ""), incoming.get("ua", ""), incoming.get("fingerprint", ""))
