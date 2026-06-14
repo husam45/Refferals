@@ -73,6 +73,18 @@ if not WEBAPP_URL.startswith(("http://", "https://")):
     WEBAPP_URL = f"https://{WEBAPP_URL}"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 📜 OFFICIAL SYSTEM TERMS & ANTI-FRAUD CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+BOT_RULES_CAPTION = (
+    "📜 <b>System Terms of Service & Anti-Fraud Policy</b>\n\n"
+    "1. <b>Strict Integrity:</b> Self-referrals, coordinated multi-accounting schemes, or creating fake profiles are strictly prohibited.\n"
+    "2. <b>Security Protocols:</b> The use of VPNs, proxy networks, or automated emulators is heavily banned. Detection triggers an immediate account block.\n"
+    "3. <b>Reward Settlement:</b> Invite rewards are only credited once the referee opens the Mini App and clears the unique hardware attestation scan.\n"
+    "4. <b>Withdrawal Review:</b> All payouts are processed by our financial desk within 24 hours of submission.\n\n"
+    "⚠️ <i>Note: Violations of these core terms will result in a permanent ban and complete asset forfeiture.</i>"
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PERSISTENT STORAGE DATA ENGINE (Embedded Database Layer)
 # ─────────────────────────────────────────────────────────────────────────────
 class DataEngine:
@@ -353,7 +365,7 @@ async def execute_network_vpn_lookup(client_ip: str) -> bool:
         return False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UI/UX INTERACTIVE KEYBOARD FACTORIES
+# UI/UX INTERACTIVE KEYBOARD FACTORIES (Bilingual Controls Stored as Requested)
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_verification_widget(user_id: int, target_referrer: int) -> InlineKeyboardMarkup:
     target_destination_url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={target_referrer}"
@@ -399,7 +411,7 @@ async def process_start_command(message: Message, state: FSMContext):
 
     account_profile = await DataEngine.fetch_user(caller_id)
     if account_profile and account_profile["is_banned"]:
-        return await message.answer("🚫 <b>Access Denied:</b> Your account profile has been blacklisted from our networks.")
+        return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted from our platform due to policy violations.")
 
     unjoined_dependencies = await inspect_compulsory_memberships(caller_id)
     if unjoined_dependencies:
@@ -414,15 +426,18 @@ async def process_start_command(message: Message, state: FSMContext):
         keyboard_assembler.append([InlineKeyboardButton(text="✅ Joined — Check System Status", callback_data="ui_revalidate_channels")])
         inline_response_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_assembler)
         return await message.answer(
-            "⚠️ <b>System Access Blocked:</b>\nTo communicate with our infrastructure, you are requested to join our networks below:", 
+            "👋 <b>Welcome to our Platform!</b>\n\n"
+            "To unlock the system features and clear our gateway, you are required to join our channels below:", 
             reply_markup=inline_response_markup
         )
 
     if await DataEngine.check_device_status(caller_id):
-        return await message.answer("👋 <b>Welcome Back!</b> Access granted to your decentralized control terminal.", reply_markup=generate_dashboard_matrix(caller_id))
+        return await message.answer("✅ <b>Welcome back!</b> Access granted to your interactive control panel dashboard.", reply_markup=generate_dashboard_matrix(caller_id))
     
+    # Send rules automatically if channels are already cleared
     await message.answer(
-        "⚠️ <b>Advanced Anti-Bot Verification Demanded:</b>\nOur network detects unverified telemetry footprints. Press the module below to verify.", 
+        f"{BOT_RULES_CAPTION}\n\n"
+        "🔐 <b>Next Step:</b> Please proceed to verify your device signature using the Mini App widget below:", 
         reply_markup=generate_verification_widget(caller_id, validated_referrer)
     )
 
@@ -432,7 +447,7 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
     unjoined_dependencies = await inspect_compulsory_memberships(caller_id)
     
     if unjoined_dependencies:
-        await callback.answer("❌ Verification parameters failed. You haven't joined all required channels.", show_alert=True)
+        await callback.answer("❌ Membership verification failed. Please join all required networks first.", show_alert=True)
     else:
         await callback.message.delete()
         session_variables = await state.get_data()
@@ -440,23 +455,28 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
         await state.clear()
         
         if await DataEngine.check_device_status(caller_id):
-            await callback.message.answer("✅ Device identity clear. Welcome!", reply_markup=generate_dashboard_matrix(caller_id))
+            await callback.message.answer("✅ Device identity clear. Access granted!", reply_markup=generate_dashboard_matrix(caller_id))
         else:
-            await callback.message.answer("✅ Gateway confirmed. Final step: Complete Mini App device authentication.", reply_markup=generate_verification_widget(caller_id, saved_referrer))
+            # Displaying professional system terms immediately after channel validation pass
+            await callback.message.answer(
+                f"{BOT_RULES_CAPTION}\n\n"
+                "🔐 <b>Final Attestation Step:</b> Click the button below to launch our secure verification engine via Mini App:", 
+                reply_markup=generate_verification_widget(caller_id, saved_referrer)
+            )
 
 @core_router.callback_query(F.data == "ui_return_home")
 async def process_navigation_home(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("🏠 <b>Main Core Dashboard / ዋና ማውጫ</b>", reply_markup=generate_dashboard_matrix(callback.from_user.id))
+    await callback.message.edit_text("🏠 <b>Main Dashboard Menu / ዋና ማውጫ</b>", reply_markup=generate_dashboard_matrix(callback.from_user.id))
 
 @core_router.callback_query(F.data == "ui_fetch_balance")
 async def process_balance_query(callback: CallbackQuery):
     account_data = await DataEngine.fetch_user(callback.from_user.id)
     minimum_limit = await DataEngine.read_config("min_withdrawal", "50")
     response_text = (
-        f"💰 <b>Your Available Assets Ledger:</b>\n\n"
-        f"• Current Balance: <code>{account_data['balance']:.2f} Birr</code>\n"
-        f"• Network Minimum Threshold: <code>{minimum_limit} Birr</code>"
+        f"💰 <b>Your Available Financial Ledger:</b>\n\n"
+        f"• Current Asset Balance: <code>{account_data['balance']:.2f} Birr</code>\n"
+        f"• Minimum Payout Limit: <code>{minimum_limit} Birr</code>"
     )
     await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
 
@@ -467,8 +487,8 @@ async def process_referral_query(callback: CallbackQuery):
     total_revenue = referrals_count * bounty_rate
     response_text = (
         f"👥 <b>Your Referral Network Matrix:</b>\n\n"
-        f"• Total Direct Connections: <b>{referrals_count} Users</b>\n"
-        f"• Total Network Profits: <b>{total_revenue:.2f} Birr</b>"
+        f"• Total Direct Referrals: <b>{referrals_count} users</b>\n"
+        f"• Net Accumulated Profits: <b>{total_revenue:.2f} Birr</b>"
     )
     await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
 
@@ -476,8 +496,8 @@ async def process_referral_query(callback: CallbackQuery):
 async def process_link_generation(callback: CallbackQuery):
     identity_profile = await bot.get_me()
     response_text = (
-        f"🔗 <b>Your Monetized Referral Pipeline:</b>\n\n"
-        f"Share this encrypted invite link to receive passive network allocations:\n"
+        f"🔗 <b>Your Unique Invite URL Blueprint:</b>\n\n"
+        f"Share this encrypted tracking pipeline link to receive passive network allocations:\n"
         f"<code>https://t.me/{identity_profile.username}?start={callback.from_user.id}</code>"
     )
     await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
@@ -491,7 +511,7 @@ async def process_withdrawal_pipeline_start(callback: CallbackQuery, state: FSMC
     minimum_allowed_cashout = float(await DataEngine.read_config("min_withdrawal", "50"))
     
     if user_profile["balance"] < minimum_allowed_cashout:
-        return await callback.answer(f"❌ Transaction Blocked: You must accumulate at least {minimum_allowed_cashout} Birr to cashout.", show_alert=True)
+        return await callback.answer(f"❌ Transaction Terminated: Minimum payout baseline is {minimum_allowed_cashout} Birr.", show_alert=True)
         
     await state.set_state(UserWithdrawalWorkflow.select_payout_gateway)
     await state.update_data(cached_balance=user_profile["balance"], cached_minimum=minimum_allowed_cashout)
@@ -506,7 +526,7 @@ async def process_withdrawal_pipeline_start(callback: CallbackQuery, state: FSMC
 async def process_telebirr_selection(callback: CallbackQuery, state: FSMContext):
     await state.update_data(selected_gateway="Telebirr")
     await state.set_state(UserWithdrawalWorkflow.input_cash_volume)
-    await callback.message.edit_text("<b>Enter Payout Volume / የብር መጠን ያስገቡ፦</b>", reply_markup=generate_fallback_navigation())
+    await callback.message.edit_text("<b>Specify the amount you wish to withdraw:</b>", reply_markup=generate_fallback_navigation())
 
 @core_router.message(UserWithdrawalWorkflow.input_cash_volume)
 async def process_cashout_volume_input(message: Message, state: FSMContext):
@@ -519,7 +539,7 @@ async def process_cashout_volume_input(message: Message, state: FSMContext):
         
     await state.update_data(validated_volume=user_input_volume)
     await state.set_state(UserWithdrawalWorkflow.provide_mobile_digits)
-    await message.answer("📱 <b>Provide Destination Account Number / የቴሌብር ስልክ ቁጥር ያስገቡ፦</b>")
+    await message.answer("📱 <b>Provide Destination Account Mobile Number:</b>")
 
 @core_router.message(UserWithdrawalWorkflow.provide_mobile_digits)
 async def process_mobile_number_input(message: Message, state: FSMContext):
@@ -529,13 +549,13 @@ async def process_mobile_number_input(message: Message, state: FSMContext):
         
     await state.update_data(validated_phone=cleaned_input)
     await state.set_state(UserWithdrawalWorkflow.provide_account_title)
-    await message.answer("📝 <b>Enter Legitimate Account Holder Title / ሙሉ ስም ያስገቡ፦</b>")
+    await message.answer("📝 <b>Enter Legitimate Account Holder Full Name:</b>")
 
 @core_router.message(UserWithdrawalWorkflow.provide_account_title)
 async def process_account_title_input(message: Message, state: FSMContext):
     cleaned_title = message.text.strip()
     if len(cleaned_title) < 3:
-        return await message.answer("❌ <b>Input Defect:</b> Name field string length too short.")
+        return await message.answer("❌ <b>Input Defect:</b> Provided name context is too short.")
         
     await state.update_data(validated_title=cleaned_title)
     session_data = await state.get_data()
@@ -545,8 +565,8 @@ async def process_account_title_input(message: Message, state: FSMContext):
         f"• Settlement Platform: <code>{session_data['selected_gateway']}</code>\n"
         f"• Payout Weight: <code>{session_data['validated_volume']:.2f} ETB</code>\n"
         f"• Holder Identity: <code>{session_data['validated_title']}</code>\n"
-        f"• Endpoint Channel: <code>{session_data['validated_phone']}</code>\n\n"
-        f"Are you authorized to dispatch this transactional operation?"
+        f"• Destination Endpoint: <code>{session_data['validated_phone']}</code>\n\n"
+        f"Do you authorize this settlement transaction?"
     )
     
     navigation_markup = InlineKeyboardMarkup(inline_keyboard=[[
@@ -563,7 +583,7 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
     user_live_profile = await DataEngine.fetch_user(caller_id)
     
     if user_live_profile["balance"] < session_variables["validated_volume"]:
-        return await callback.answer("❌ Settlement Error: Ledger transaction collision detected.", show_alert=True)
+        return await callback.answer("❌ Settlement Error: Ledger transaction tracking error.", show_alert=True)
 
     ticket_id = await DataEngine.schedule_withdrawal(
         user_id=caller_id,
@@ -579,7 +599,7 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
     channeled_post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
-            account_alias = f"@{user_live_profile['username']}" if user_live_profile.get('username') else "Private Topology"
+            account_alias = f"@{user_live_profile['username']}" if user_live_profile.get('username') else "Private Profile"
             broadcast_notification_text = (
                 f"✅ <b>NEW PAYOUT TRANSACTION REQUESTED</b>\n\n"
                 f"👤 <b>Claimant Node:</b> {session_variables['validated_title']} ({account_alias})\n"
@@ -610,7 +630,7 @@ async def process_payout_finalization(callback: CallbackQuery, state: FSMContext
         except Exception:
             pass
 
-    await callback.message.edit_text("📨 <b>Transaction Sent:</b> Settlement parameters successfully queued. Track channel nodes for status updates.")
+    await callback.message.edit_text("📨 <b>Transaction Logged:</b> Settlement parameters queued for review. Status updates will be piped to the official channel.")
 
 @core_router.callback_query(F.data.startswith("adm_payout_ap_"))
 async def process_admin_ticket_approval(callback: CallbackQuery):
@@ -646,7 +666,7 @@ async def process_admin_ticket_approval(callback: CallbackQuery):
             logger.error(f"Failed to generate transactional reply metadata thread on node: {threading_err}")
 
     try:
-        await bot.send_message(withdrawal_record["user_id"], f"🎉 <b>Settlement Alert:</b> Your payout request of {withdrawal_record['amount']:.2f} Birr has been processed!")
+        await bot.send_message(withdrawal_record["user_id"], f"🎉 <b>Settlement Alert:</b> Your cashout request of {withdrawal_record['amount']:.2f} Birr has been successfully processed and sent!")
     except Exception:
         pass
         
@@ -667,7 +687,7 @@ async def process_admin_ticket_rejection(callback: CallbackQuery):
     await DataEngine.modify_balance(withdrawal_record["user_id"], withdrawal_record["amount"])
     
     try:
-        await bot.send_message(withdrawal_record["user_id"], "❌ <b>Settlement Refusal:</b> Your cashout request was rejected. Assets returned to balance.")
+        await bot.send_message(withdrawal_record["user_id"], "❌ <b>Settlement Refusal:</b> Your cashout request was rejected. Assets have been returned to your wallet balance.")
     except Exception:
         pass
         
@@ -984,7 +1004,7 @@ async def execute_secure_device_verification(request: Request):
         try:
             await bot.send_message(
                 chat_id=passed_referrer_id,
-                text=f"🎉 <b>Network Bounty Allocated!</b>\nYour direct connection successfully verified identity. <code>+{bounty_allocation} Birr</code> credited."
+                text=f"🎉 <b>Network Bounty Allocated!</b>\nYour referral connection successfully cleared registration. <code>+{bounty_allocation} Birr</code> credited."
             )
         except Exception:
             pass
@@ -992,7 +1012,7 @@ async def execute_secure_device_verification(request: Request):
     try:
         await bot.send_message(
             chat_id=client_user_id,
-            text="✅ <b>Verification Confirmed Successfully!</b>\nYour node token is signed. Access granted to core dashboard menu.",
+            text="✅ <b>Verification Confirmed Successfully!</b>\nYour hardware signature has been signed. Access granted to the interface terminal.",
             reply_markup=generate_dashboard_matrix(client_user_id)
         )
     except Exception:
