@@ -3,20 +3,15 @@
                     TELEGRAM ADVANCED REFERRAL BOT SYSTEM
          [ Complete Production Engine - All-In-One Unified Architecture ]
 ================================================================================
-This script contains the entire bot framework, embedded production sqlite database
-handlers, robust security modules against multi-accounts/VPNs, sneaky channel 
-advertising engine, and automated Telebirr payout confirmation logs via channels.
-================================================================================
 """
 
 import os
 import sys
 import json
 import hmac
-import uuid
-import logging
 import asyncio
 import hashlib
+import logging
 import urllib.parse
 from datetime import datetime
 
@@ -29,17 +24,17 @@ from dotenv import load_dotenv
 # Aiogram Framework Imports
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.enums import ParseMode, ChatMemberStatus
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+    WebAppInfo
 )
 
 # FastAPI Engine Imports
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -60,221 +55,220 @@ logger = logging.getLogger("ReferralBotSystem")
 # ─────────────────────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip()]
-
-# @Hfearningproof የሚለውን ሊንክ በቀጥታ በጽሑፍ (String) እንዲቀበል ተደርጓል
 PAYMENT_LOG_CHANNEL = os.getenv("PAYMENT_LOG_CHANNEL", "").strip()
-
 WEBAPP_URL = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_API_KEY = os.getenv("PROXYCHECK_API_KEY", "")
-DATABASE_FILENAME = "bot_production_core.db"
+DB_PATH = "referral_bot.db"
 
-# 📸 Telebirr Verification Target Banner FileID
 TELEBIRR_PROOF_IMAGE = "AgACAgQAAxkBAAOYai38ooud5iofBd3aDGuCiX273t8AAj4PaxsYl3BR78MpfA_cDpkBAAMCAAN4AAM8BA"
 
-# Ensure Protocol Prefix For WebApp
 if not WEBAPP_URL.startswith(("http://", "https://")):
     WEBAPP_URL = f"https://{WEBAPP_URL}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 📜 OFFICIAL SYSTEM TERMS & ANTI-FRAUD CONFIGURATION
-# ─────────────────────────────────────────────────────────────────────────────
 BOT_RULES_CAPTION = (
     "📜 <b>System Terms of Service & Anti-Fraud Policy</b>\n\n"
     "1. <b>Strict Integrity:</b> Self-referrals, coordinated multi-accounting schemes, or creating fake profiles are strictly prohibited.\n"
-    "2. <b>Security Protocols:</b> The use of VPNs, proxy networks, or automated emulators is heavily banned. Detection triggers an immediate account block.\n"
-    "3. <b>Reward Settlement:</b> Invite rewards are only credited once the referee opens the Mini App and clears the unique hardware attestation scan.\n"
-    "4. <b>Withdrawal Review:</b> All payouts are processed by our financial desk within 24 hours of submission.\n\n"
-    "⚠️ <i>Note: Violations of these core terms will result in a permanent ban and complete asset forfeiture.</i>"
+    "2. <b>Security Protocols:</b> The use of VPNs, proxy networks, or automated emulators is heavily banned.\n"
+    "3. <b>Reward Settlement:</b> Invite rewards are only credited once the referee opens the Mini App and clears the validation scan.\n"
+    "4. <b>Withdrawal Review:</b> All payouts are processed by our financial desk within 24 hours.\n\n"
+    "⚠️ <i>Note: Violations will result in a permanent ban.</i>"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PERSISTENT STORAGE DATA ENGINE (Embedded Database Layer)
+# DATA SEED LAYER & UNIFIED DB INTEGRATION
 # ─────────────────────────────────────────────────────────────────────────────
+SCHEMA = """
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    full_name TEXT,
+    referred_by INTEGER,
+    balance REAL DEFAULT 0,
+    is_banned INTEGER DEFAULT 0,
+    joined_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER UNIQUE,
+    ip_address TEXT,
+    user_agent TEXT,
+    fingerprint TEXT,
+    verified_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS withdrawals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    amount REAL,
+    full_name TEXT,
+    phone TEXT,
+    status TEXT DEFAULT 'pending',
+    channel_post_id INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS force_channels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id TEXT UNIQUE,
+    channel_name TEXT,
+    invite_link TEXT
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('reward_per_referral', '10');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('min_withdrawal', '50');
+"""
+
 class DataEngine:
     @staticmethod
     async def init_database():
-        """Initializes the SQLite tables inside the unified runtime."""
-        logger.info("Initializing relational database tables...")
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            # Core Users Profile Table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS system_users (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    full_name TEXT,
-                    balance REAL DEFAULT 0.0,
-                    referrer_id INTEGER,
-                    is_banned INTEGER DEFAULT 0,
-                    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # Unified Traffic Force Join / Sneaky Channels Table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS marketing_channels (
-                    channel_id TEXT PRIMARY KEY,
-                    channel_name TEXT,
-                    invite_link TEXT,
-                    is_optional INTEGER DEFAULT 0,
-                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # Ledger Cashouts Table
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS user_withdrawals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    amount REAL,
-                    full_name TEXT,
-                    phone_number TEXT,
-                    payout_method TEXT,
-                    status TEXT DEFAULT 'pending',
-                    channel_post_id INTEGER DEFAULT 0,
-                    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # Multi-Account & Node IP Ledger
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS device_verifications (
-                    user_id INTEGER PRIMARY KEY,
-                    ip_address TEXT,
-                    fingerprint_hash TEXT,
-                    verification_method TEXT,
-                    verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # Fast System Metadata / KV Registry
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS system_metadata (
-                    meta_key TEXT PRIMARY KEY,
-                    meta_value TEXT
-                )
-            """)
-            await conn.commit()
-        logger.info("Database validation framework executed successfully.")
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.executescript(SCHEMA)
+            await db.commit()
 
     @staticmethod
-    async def fetch_user(user_id: int):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            conn.row_factory = aiosqlite.Row
-            async with conn.execute("SELECT * FROM system_users WHERE user_id = ?", (user_id,)) as cursor:
-                return await cursor.fetchone()
+    async def get_user(user_id: int):
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+            return await cur.fetchone()
 
     @staticmethod
-    async def record_user(user_id: int, username: str, full_name: str, referrer_id: int = None):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            try:
-                await conn.execute(
-                    "INSERT INTO system_users (user_id, username, full_name, referrer_id) VALUES (?, ?, ?, ?)",
-                    (user_id, username, full_name, referrer_id)
-                )
-                await conn.commit()
-            except aiosqlite.IntegrityError:
-                pass
-
-    @staticmethod
-    async def modify_balance(user_id: int, volume: float):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute(
-                "UPDATE system_users SET balance = balance + ? WHERE user_id = ?", 
-                (volume, user_id)
+    async def create_user(user_id: int, username: str, full_name: str, referred_by: int = None):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO users (user_id, username, full_name, referred_by) VALUES (?, ?, ?, ?)",
+                (user_id, username, full_name, referred_by),
             )
-            await conn.commit()
+            await db.commit()
 
     @staticmethod
-    async def check_device_status(user_id: int) -> bool:
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            async with conn.execute("SELECT 1 FROM device_verifications WHERE user_id = ?", (user_id,)) as cursor:
-                res = await cursor.fetchone()
-                return res is not None
+    async def add_balance(user_id: int, amount: float):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+            await db.commit()
 
     @staticmethod
-    async def register_verification(user_id: int, ip: str, fingerprint: str, method: str):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute(
-                "INSERT OR REPLACE INTO device_verifications (user_id, ip_address, fingerprint_hash, verification_method) VALUES (?, ?, ?, ?)",
-                (user_id, ip, fingerprint, method)
-            )
-            await conn.commit()
+    async def get_referral_count(user_id: int) -> int:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute("SELECT COUNT(*) as cnt FROM users WHERE referred_by = ?", (user_id,))
+            row = await cur.fetchone()
+            return row["cnt"] if row else 0
 
     @staticmethod
-    async def discover_clones(ip: str, fingerprint: str, current_user: int) -> bool:
+    async def ban_user(user_id: int, status: int = 1):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE users SET is_banned = ? WHERE user_id = ?", (status, user_id))
+            await db.commit()
+
+    @staticmethod
+    async def is_verified(user_id: int) -> bool:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute("SELECT id FROM verifications WHERE user_id = ?", (user_id,))
+            return (await cur.fetchone()) is not None
+
+    @staticmethod
+    async def find_duplicate(ip: str, fingerprint: str, exclude_user: int):
         if not fingerprint or fingerprint == "undefined":
-            return False
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            async with conn.execute(
-                "SELECT 1 FROM device_verifications WHERE (ip_address = ? OR fingerprint_hash = ?) AND user_id != ?",
-                (ip, fingerprint, current_user)
-            ) as cursor:
-                res = await cursor.fetchone()
-                return res is not None
-
-    @staticmethod
-    async def banish_user(user_id: int, status: int = 1):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute("UPDATE system_users SET is_banned = ? WHERE user_id = ?", (status, user_id))
-            await conn.commit()
-
-    @staticmethod
-    async def compute_referrals(user_id: int) -> int:
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            async with conn.execute("SELECT COUNT(*) FROM system_users WHERE referrer_id = ?", (user_id,)) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else 0
-
-    @staticmethod
-    async def schedule_withdrawal(user_id: int, amount: float, name: str, phone: str, method: str) -> int:
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            cursor = await conn.execute(
-                "INSERT INTO user_withdrawals (user_id, amount, full_name, phone_number, payout_method) VALUES (?, ?, ?, ?, ?)",
-                (user_id, amount, name, phone, method)
+            return None
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT user_id FROM verifications WHERE (ip_address = ? OR fingerprint = ?) AND user_id != ? LIMIT 1",
+                (ip, fingerprint, exclude_user),
             )
-            await conn.commit()
-            return cursor.lastrowid
+            row = await cur.fetchone()
+            return row["user_id"] if row else None
 
     @staticmethod
-    async def get_withdrawal_ticket(w_id: int):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            conn.row_factory = aiosqlite.Row
-            async with conn.execute("SELECT * FROM user_withdrawals WHERE id = ?", (w_id,)) as cursor:
-                return await cursor.fetchone()
-
-    @staticmethod
-    async def update_withdrawal_log(w_id: int, status: str, post_id: int = 0):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute(
-                "UPDATE user_withdrawals SET status = ?, channel_post_id = ? WHERE id = ?",
-                (status, post_id, w_id)
+    async def save_verification(user_id: int, ip: str, ua: str, fingerprint: str):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO verifications (user_id, ip_address, user_agent, fingerprint) VALUES (?, ?, ?, ?)",
+                (user_id, ip, ua, fingerprint),
             )
-            await conn.commit()
+            await db.commit()
 
     @staticmethod
-    async def pull_pending_tickets():
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            conn.row_factory = aiosqlite.Row
-            async with conn.execute("SELECT * FROM user_withdrawals WHERE status = 'pending'") as cursor:
-                return await cursor.fetchall()
+    async def create_withdrawal(user_id: int, amount: float, full_name: str, phone: str) -> int:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "INSERT INTO withdrawals (user_id, amount, full_name, phone) VALUES (?, ?, ?, ?)",
+                (user_id, amount, full_name, phone),
+            )
+            await db.commit()
+            return cur.lastrowid
 
     @staticmethod
-    async def write_config(key: str, value: str):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute("INSERT OR REPLACE INTO system_metadata (meta_key, meta_value) VALUES (?, ?)", (key, value))
-            await conn.commit()
+    async def get_withdrawal(wid: int):
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM withdrawals WHERE id = ?", (wid,))
+            return await cur.fetchone()
 
     @staticmethod
-    async def read_config(key: str, fallback: str) -> str:
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            async with conn.execute("SELECT meta_value FROM system_metadata WHERE meta_key = ?", (key,)) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else fallback
+    async def update_withdrawal_status(wid: int, status: str, post_id: int = 0):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "UPDATE withdrawals SET status = ?, channel_post_id = ?, resolved_at = datetime('now') WHERE id = ?",
+                (status, post_id, wid),
+            )
+            await db.commit()
 
     @staticmethod
-    async def unlink_channel(channel_id: str):
-        async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-            await conn.execute("DELETE FROM marketing_channels WHERE channel_id = ?", (channel_id,))
-            await conn.commit()
+    async def get_pending_withdrawals():
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM withdrawals WHERE status = 'pending' ORDER BY created_at")
+            return await cur.fetchall()
+
+    @staticmethod
+    async def add_force_channel(channel_id: str, channel_name: str, invite_link: str):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO force_channels (channel_id, channel_name, invite_link) VALUES (?, ?, ?)",
+                (channel_id, channel_name, invite_link),
+            )
+            await db.commit()
+
+    @staticmethod
+    async def remove_force_channel(channel_id: str):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM force_channels WHERE channel_id = ?", (channel_id,))
+            await db.commit()
+
+    @staticmethod
+    async def get_force_channels():
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM force_channels")
+            return await cur.fetchall()
+
+    @staticmethod
+    async def get_setting(key: str, default=None):
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = await cur.fetchone()
+            return row["value"] if row else default
+
+    @staticmethod
+    async def set_setting(key: str, value: str):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+            await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TELEGRAM RUNTIME FSM CONFIGURATION
+# RUNTIME STATE ENGINE & DECORATORS
 # ─────────────────────────────────────────────────────────────────────────────
 class UserWithdrawalWorkflow(StatesGroup):
     select_payout_gateway = State()
@@ -289,9 +283,6 @@ class AdminConsoleWorkflow(StatesGroup):
     append_mandatory_id      = State()
     append_mandatory_title   = State()
     append_mandatory_url     = State()
-    append_sneaky_id         = State()
-    append_sneaky_title      = State()
-    append_sneaky_url        = State()
     direct_balance_target_id = State()
     direct_balance_volume    = State()
     broadcast_intel_payload  = State()
@@ -299,15 +290,11 @@ class AdminConsoleWorkflow(StatesGroup):
     banish_individual_id     = State()
     pardon_individual_id     = State()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CORE TELEGRAM BOT CONTROLLERS & SECURE ROUTERS
-# ─────────────────────────────────────────────────────────────────────────────
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 storage_memory = MemoryStorage()
 dp = Dispatcher(storage=storage_memory)
 core_router = Router()
 
-# Security Validation Logic
 def evaluate_admin_access(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
@@ -317,80 +304,59 @@ def parse_telegram_webapp_handshake(init_data: str) -> dict | None:
         verification_hash = parsed_matrix.pop("hash", "")
         sorted_payload_strings = [f"{k}={v}" for k, v in sorted(parsed_matrix.items())]
         compiled_data_check_string = "\n".join(sorted_payload_strings)
-        
         hmac_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         computed_signature = hmac.new(hmac_key, compiled_data_check_string.encode(), hashlib.sha256).hexdigest()
-        
         if not hmac.compare_digest(computed_signature, verification_hash):
             return None
         return json.loads(parsed_matrix.get("user", "{}"))
-    except Exception as exc:
-        logger.error(f"Error evaluating WebApp handshake signature: {exc}")
+    except Exception:
         return None
 
 async def inspect_compulsory_memberships(user_id: int) -> list:
-    """Verifies mandatory target systems strictly."""
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute("SELECT * FROM marketing_channels WHERE is_optional = 0") as cursor:
-            mandatory_nodes = await cursor.fetchall()
-            
+    mandatory_nodes = await DataEngine.get_force_channels()
     unmatched_nodes = []
     for node in mandatory_nodes:
         try:
             member_receipt = await bot.get_chat_member(chat_id=node["channel_id"], user_id=user_id)
             if member_receipt.status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED]:
                 unmatched_nodes.append(node)
-        except Exception as chat_err:
-            logger.warning(f"Unable to read status properties for user {user_id} on {node['channel_id']}: {chat_err}")
+        except Exception:
             unmatched_nodes.append(node)
     return unmatched_nodes
-
-async def extract_all_channels() -> list:
-    """Pulls all tracking records (Mandatory mixed with Sneaky Optionals)."""
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute("SELECT * FROM marketing_channels") as cursor:
-            return await cursor.fetchall()
 
 async def execute_network_vpn_lookup(client_ip: str) -> bool:
     if not client_ip or client_ip in ("127.0.0.1", "::1", "unknown"):
         return False
     try:
-        api_authentication_parameter = f"&key={PROXYCHECK_API_KEY}" if PROXYCHECK_API_KEY else ""
-        query_endpoint = f"https://proxycheck.io/v2/{client_ip}?vpn=1{api_authentication_parameter}"
-        async with httpx.AsyncClient(timeout=4) as network_client:
-            response_payload = await network_client.get(query_endpoint)
-            parsed_json = response_payload.json()
-            return parsed_json.get(client_ip, {}).get("proxy") == "yes"
-    except Exception as network_error:
-        logger.error(f"Proxycheck node experienced a connection bottleneck: {network_error}")
+        api_param = f"&key={PROXYCHECK_API_KEY}" if PROXYCHECK_API_KEY else ""
+        query_endpoint = f"https://proxycheck.io/v2/{client_ip}?vpn=1{api_param}"
+        async with httpx.AsyncClient(timeout=4) as client:
+            res = await client.get(query_endpoint)
+            return res.json().get(client_ip, {}).get("proxy") == "yes"
+    except Exception:
         return False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UI/UX INTERACTIVE KEYBOARD FACTORIES (Bilingual Controls Stored as Requested)
+# UI INTERACTIVE INTERFACES
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_verification_widget(user_id: int, target_referrer: int) -> InlineKeyboardMarkup:
-    target_destination_url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={target_referrer}"
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔐 Open Mini App & Verify", web_app=WebAppInfo(url=target_destination_url))
-    ]])
+    url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={target_referrer}"
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔐 Open Mini App & Verify", web_app=WebAppInfo(url=url))]])
 
 def generate_dashboard_matrix(user_id: int) -> InlineKeyboardMarkup:
-    markup_blueprint = [
+    markup = [
         [InlineKeyboardButton(text="💰 Balance / ሒሳብ", callback_data="ui_fetch_balance"), InlineKeyboardButton(text="👥 Referrals / ጋባዦች", callback_data="ui_fetch_referrals")],
         [InlineKeyboardButton(text="🔗 My Link / ሊንኬ", callback_data="ui_fetch_link"), InlineKeyboardButton(text="💸 Withdraw / ብር ማውጫ", callback_data="ui_initiate_withdrawal")],
     ]
     if evaluate_admin_access(user_id):
-        markup_blueprint.append([InlineKeyboardButton(text="⚙️ Admin Control Center", callback_data="ui_admin_core")])
-    return InlineKeyboardMarkup(inline_keyboard=markup_blueprint)
+        markup.append([InlineKeyboardButton(text="⚙️ Admin Control Center", callback_data="ui_admin_core")])
+    return InlineKeyboardMarkup(inline_keyboard=markup)
 
 def generate_admin_dashboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💎 Set Referral Reward", callback_data="adm_cmd_reward"), InlineKeyboardButton(text="💵 Set Min Withdrawal", callback_data="adm_cmd_min_wd")],
         [InlineKeyboardButton(text="✍️ Edit User Balance", callback_data="adm_cmd_edit_bal"), InlineKeyboardButton(text="📊 Bot Statistics", callback_data="adm_cmd_stats")],
-        [InlineKeyboardButton(text="🔴 Add Force Channel", callback_data="adm_cmd_add_mand")],
-        [InlineKeyboardButton(text="🗑 Remove Channel", callback_data="adm_cmd_rm_node"), InlineKeyboardButton(text="📋 List Channels", callback_data="adm_cmd_list_nodes")],
+        [InlineKeyboardButton(text="🔴 Add Force Channel", callback_data="adm_cmd_add_mand"), InlineKeyboardButton(text="🗑 Remove Channel", callback_data="adm_cmd_rm_node")],
         [InlineKeyboardButton(text="📥 Pending Withdrawals", callback_data="adm_cmd_pending_tickets"), InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_cmd_broadcast")],
         [InlineKeyboardButton(text="🔍 Search User Info", callback_data="adm_cmd_search")],
         [InlineKeyboardButton(text="🚫 Ban User", callback_data="adm_cmd_ban"), InlineKeyboardButton(text="✅ Unban User", callback_data="adm_cmd_unban")],
@@ -401,69 +367,50 @@ def generate_fallback_navigation(target_callback="ui_return_home") -> InlineKeyb
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Back / ተመለስ", callback_data=target_callback)]])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# USER EXPERIENCE OVERVIEW HANDLERS (Telegram Endpoint Logic)
+# TELEGRAM USER CONTROLLERS
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.message(CommandStart())
 async def process_start_command(message: Message, state: FSMContext):
     await state.clear()
     caller_id = message.from_user.id
-    command_segments = message.text.split()
-    
-    extracted_argument = command_segments[1] if len(command_segments) > 1 else ""
-    validated_referrer = int(extracted_argument) if extracted_argument.isdigit() and int(extracted_argument) != caller_id else 0
+    segments = message.text.split()
+    argument = segments[1] if len(segments) > 1 else ""
+    validated_referrer = int(argument) if argument.isdigit() and int(argument) != caller_id else 0
 
-    account_profile = await DataEngine.fetch_user(caller_id)
-    if account_profile and account_profile["is_banned"]:
-        return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted from our platform due to policy violations.")
+    account = await DataEngine.get_user(caller_id)
+    if account and account["is_banned"]:
+        return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted.")
 
-    unjoined_dependencies = await inspect_compulsory_memberships(caller_id)
-    if unjoined_dependencies:
-        mixed_advertising_flow = await extract_all_channels()
+    unjoined = await inspect_compulsory_memberships(caller_id)
+    if unjoined:
         if validated_referrer:
             await state.update_data(stashed_referrer_id=validated_referrer)
-            
-        keyboard_assembler = []
-        for channel in mixed_advertising_flow:
-            keyboard_assembler.append([InlineKeyboardButton(text=f"➕ {channel['channel_name']}", url=channel["invite_link"])])
-            
-        keyboard_assembler.append([InlineKeyboardButton(text="✅ Joined — Check System Status", callback_data="ui_revalidate_channels")])
-        inline_response_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_assembler)
-        return await message.answer(
-            "👋 <b>Welcome to our Platform!</b>\n\n"
-            "To unlock the system features and clear our gateway, you are required to join our channels below:", 
-            reply_markup=inline_response_markup
-        )
+        keyboard = []
+        for ch in await DataEngine.get_force_channels():
+            keyboard.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch['invite_link'])])
+        keyboard.append([InlineKeyboardButton(text="✅ Joined — Verify Status", callback_data="ui_revalidate_channels")])
+        return await message.answer("👋 <b>Welcome!</b> Please join our channels below to unlock the bot system:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
-    if await DataEngine.check_device_status(caller_id):
-        return await message.answer("✅ <b>Welcome back!</b> Access granted to your interactive control panel dashboard.", reply_markup=generate_dashboard_matrix(caller_id))
+    if await DataEngine.is_verified(caller_id):
+        return await message.answer("✅ <b>Welcome back!</b> Access granted.", reply_markup=generate_dashboard_matrix(caller_id))
     
-    await message.answer(
-        f"{BOT_RULES_CAPTION}\n\n"
-        "🔐 <b>Next Step:</b> Please proceed to verify your device signature using the Mini App widget below:", 
-        reply_markup=generate_verification_widget(caller_id, validated_referrer)
-    )
+    await message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Next Step:</b> Verify your identity via Mini App:", reply_markup=generate_verification_widget(caller_id, validated_referrer))
 
 @core_router.callback_query(F.data == "ui_revalidate_channels")
 async def process_channel_revalidation(callback: CallbackQuery, state: FSMContext):
     caller_id = callback.from_user.id
-    unjoined_dependencies = await inspect_compulsory_memberships(caller_id)
-    
-    if unjoined_dependencies:
-        await callback.answer("❌ Membership verification failed. Please join all required networks first.", show_alert=True)
+    unjoined = await inspect_compulsory_memberships(caller_id)
+    if unjoined:
+        await callback.answer("❌ Membership verification failed. Join all channels first.", show_alert=True)
     else:
         await callback.message.delete()
-        session_variables = await state.get_data()
-        saved_referrer = session_variables.get("stashed_referrer_id", 0)
+        s_data = await state.get_data()
+        ref = s_data.get("stashed_referrer_id", 0)
         await state.clear()
-        
-        if await DataEngine.check_device_status(caller_id):
-            await callback.message.answer("✅ Device identity clear. Access granted!", reply_markup=generate_dashboard_matrix(caller_id))
+        if await DataEngine.is_verified(caller_id):
+            await callback.message.answer("✅ Identity clear!", reply_markup=generate_dashboard_matrix(caller_id))
         else:
-            await callback.message.answer(
-                f"{BOT_RULES_CAPTION}\n\n"
-                "🔐 <b>Final Attestation Step:</b> Click the button below to launch our secure verification engine via Mini App:", 
-                reply_markup=generate_verification_widget(caller_id, saved_referrer)
-            )
+            await callback.message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Attestation Step:</b> launch Mini App verification:", reply_markup=generate_verification_widget(caller_id, ref))
 
 @core_router.callback_query(F.data == "ui_return_home")
 async def process_navigation_home(callback: CallbackQuery, state: FSMContext):
@@ -472,464 +419,339 @@ async def process_navigation_home(callback: CallbackQuery, state: FSMContext):
 
 @core_router.callback_query(F.data == "ui_fetch_balance")
 async def process_balance_query(callback: CallbackQuery):
-    account_data = await DataEngine.fetch_user(callback.from_user.id)
-    minimum_limit = await DataEngine.read_config("min_withdrawal", "50")
-    response_text = (
-        f"💰 <b>Your Available Financial Ledger:</b>\n\n"
-        f"• Current Asset Balance: <code>{account_data['balance']:.2f} Birr</code>\n"
-        f"• Minimum Payout Limit: <code>{minimum_limit} Birr</code>"
-    )
-    await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
+    acc = await DataEngine.get_user(callback.from_user.id)
+    min_l = await DataEngine.get_setting("min_withdrawal", "50")
+    text = f"💰 <b>Your Available Balance:</b>\n\n• Assets: <code>{acc['balance']:.2f} Birr</code>\n• Minimum Withdrawal: <code>{min_l} Birr</code>"
+    await callback.message.edit_text(text, reply_markup=generate_fallback_navigation())
 
 @core_router.callback_query(F.data == "ui_fetch_referrals")
 async def process_referral_query(callback: CallbackQuery):
-    referrals_count = await DataEngine.compute_referrals(callback.from_user.id)
-    bounty_rate = float(await DataEngine.read_config("reward_per_referral", "10"))
-    total_revenue = referrals_count * bounty_rate
-    response_text = (
-        f"👥 <b>Your Referral Network Matrix:</b>\n\n"
-        f"• Total Direct Referrals: <b>{referrals_count} users</b>\n"
-        f"• Net Accumulated Profits: <b>{total_revenue:.2f} Birr</b>"
-    )
-    await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
+    cnt = await DataEngine.get_referral_count(callback.from_user.id)
+    rate = float(await DataEngine.get_setting("reward_per_referral", "10"))
+    await callback.message.edit_text(f"👥 <b>Your Referral Network:</b>\n\n• Total Referrals: <b>{cnt} users</b>\n• Net Profits: <b>{cnt*rate:.2f} Birr</b>", reply_markup=generate_fallback_navigation())
 
 @core_router.callback_query(F.data == "ui_fetch_link")
 async def process_link_generation(callback: CallbackQuery):
-    identity_profile = await bot.get_me()
-    response_text = (
-        f"🔗 <b>Your Unique Invite URL Blueprint:</b>\n\n"
-        f"Share this encrypted tracking pipeline link to receive passive network allocations:\n"
-        f"<code>https://t.me/{identity_profile.username}?start={callback.from_user.id}</code>"
-    )
-    await callback.message.edit_text(response_text, reply_markup=generate_fallback_navigation())
+    me = await bot.get_me()
+    await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TRANSACTION MANAGEMENT & CHANNEL OVERWRITE PIPELINE (Advanced Channel Payout Layer)
+# WITHDRAWALS ENGINE & AUTOMATED CHANNEL LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
-async def process_withdrawal_pipeline_start(callback: CallbackQuery, state: FSMContext):
-    user_profile = await DataEngine.fetch_user(callback.from_user.id)
-    minimum_allowed_cashout = float(await DataEngine.read_config("min_withdrawal", "50"))
-    
-    if user_profile["balance"] < minimum_allowed_cashout:
-        return await callback.answer(f"❌ Transaction Terminated: Minimum payout baseline is {minimum_allowed_cashout} Birr.", show_alert=True)
-        
+async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
+    user = await DataEngine.get_user(callback.from_user.id)
+    min_w = float(await DataEngine.get_setting("min_withdrawal", "50"))
+    if user["balance"] < min_w:
+        return await callback.answer(f"❌ Minimum payout baseline is {min_w} Birr.", show_alert=True)
     await state.set_state(UserWithdrawalWorkflow.select_payout_gateway)
-    await state.update_data(cached_balance=user_profile["balance"], cached_minimum=minimum_allowed_cashout)
-    
-    navigation_markup = InlineKeyboardMarkup(inline_keyboard=[
+    await state.update_data(cached_balance=user["balance"], cached_minimum=min_w)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📲 Telebirr / ቴሌብር", callback_data="gateway_telebirr")],
-        [InlineKeyboardButton(text="❌ Cancel Operation / ሰርዝ", callback_data="ui_return_home")]
+        [InlineKeyboardButton(text="❌ Cancel / ሰርዝ", callback_data="ui_return_home")]
     ])
-    await callback.message.edit_text("💸 <b>Select Payout Endpoint / የማውጫ መንገድ ይምረጡ፦</b>", reply_markup=navigation_markup)
+    await callback.message.edit_text("💸 <b>Select Payout Endpoint:</b>", reply_markup=markup)
 
 @core_router.callback_query(F.data == "gateway_telebirr", UserWithdrawalWorkflow.select_payout_gateway)
 async def process_telebirr_selection(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(selected_gateway="Telebirr")
     await state.set_state(UserWithdrawalWorkflow.input_cash_volume)
     await callback.message.edit_text("<b>Specify the amount you wish to withdraw:</b>", reply_markup=generate_fallback_navigation())
 
 @core_router.message(UserWithdrawalWorkflow.input_cash_volume)
-async def process_cashout_volume_input(message: Message, state: FSMContext):
-    session_parameters = await state.get_data()
+async def process_cashout_volume(message: Message, state: FSMContext):
+    s_data = await state.get_data()
     try:
-        user_input_volume = float(message.text.strip())
-        assert session_parameters["cached_minimum"] <= user_input_volume <= session_parameters["cached_balance"]
+        val = float(message.text.strip())
+        assert s_data["cached_minimum"] <= val <= s_data["cached_balance"]
     except Exception:
-        return await message.answer("❌ <b>Numeric Conflict:</b> Enter a valid amount matching your wallet limitations.")
-        
-    await state.update_data(validated_volume=user_input_volume)
+        return await message.answer("❌ Invalid amount matching your limits.")
+    await state.update_data(validated_volume=val)
     await state.set_state(UserWithdrawalWorkflow.provide_mobile_digits)
     await message.answer("📱 <b>Provide Destination Account Mobile Number:</b>")
 
 @core_router.message(UserWithdrawalWorkflow.provide_mobile_digits)
-async def process_mobile_number_input(message: Message, state: FSMContext):
-    cleaned_input = message.text.strip()
-    if len(cleaned_input) < 9:
-        return await message.answer("❌ <b>Format Deviation:</b> Provide a functional mobile endpoint.")
-        
-    await state.update_data(validated_phone=cleaned_input)
+async def process_mobile_digits(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    if len(phone) < 9:
+        return await message.answer("❌ Provide a valid mobile number.")
+    await state.update_data(validated_phone=phone)
     await state.set_state(UserWithdrawalWorkflow.provide_account_title)
-    await message.answer("📝 <b>Enter Legitimate Account Holder Full Name:</b>")
+    await message.answer("📝 <b>Enter Full Name of Account Holder:</b>")
 
 @core_router.message(UserWithdrawalWorkflow.provide_account_title)
-async def process_account_title_input(message: Message, state: FSMContext):
-    cleaned_title = message.text.strip()
-    if len(cleaned_title) < 3:
-        return await message.answer("❌ <b>Input Defect:</b> Provided name context is too short.")
-        
-    await state.update_data(validated_title=cleaned_title)
-    session_data = await state.get_data()
+async def process_account_title(message: Message, state: FSMContext):
+    title = message.text.strip()
+    if len(title) < 3:
+        return await message.answer("❌ Provided context name is too short.")
+    await state.update_data(validated_title=title)
+    s_data = await state.get_data()
     
-    confirmation_template = (
-        f"⚠️ <b>Review Asset Settlement Parameters</b>\n\n"
-        f"• Settlement Platform: <code>{session_data['selected_gateway']}</code>\n"
-        f"• Payout Weight: <code>{session_data['validated_volume']:.2f} ETB</code>\n"
-        f"• Holder Identity: <code>{session_data['validated_title']}</code>\n"
-        f"• Destination Endpoint: <code>{session_data['validated_phone']}</code>\n\n"
-        f"Do you authorize this settlement transaction?"
+    confirm_text = (
+        f"⚠️ <b>Review Settlement Details</b>\n\n"
+        f"• Platform: <code>Telebirr</code>\n"
+        f"• Amount: <code>{s_data['validated_volume']:.2f} ETB</code>\n"
+        f"• Holder: <code>{title}</code>\n"
+        f"• Number: <code>{s_data['validated_phone']}</code>\n\nAuthorization requested."
     )
-    
-    navigation_markup = InlineKeyboardMarkup(inline_keyboard=[[
+    markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Transact Payout", callback_data="action_payout_dispatch"),
-        InlineKeyboardButton(text="❌ Abort Matrix / ሰርዝ", callback_data="ui_return_home")
+        InlineKeyboardButton(text="❌ Abort / ሰርዝ", callback_data="ui_return_home")
     ]])
-    await message.answer(confirmation_template, reply_markup=navigation_markup)
+    await message.answer(confirm_text, reply_markup=markup)
     await state.set_state(UserWithdrawalWorkflow.payout_final_approval)
 
 @core_router.callback_query(F.data == "action_payout_dispatch", UserWithdrawalWorkflow.payout_final_approval)
-async def process_payout_finalization(callback: CallbackQuery, state: FSMContext):
-    session_variables = await state.get_data()
+async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
+    s_data = await state.get_data()
     caller_id = callback.from_user.id
-    user_live_profile = await DataEngine.fetch_user(caller_id)
-    
-    if user_live_profile["balance"] < session_variables["validated_volume"]:
-        return await callback.answer("❌ Settlement Error: Ledger transaction tracking error.", show_alert=True)
+    user = await DataEngine.get_user(caller_id)
+    if user["balance"] < s_data["validated_volume"]:
+        return await callback.answer("❌ Settlement Error: Insufficient funds.", show_alert=True)
 
-    ticket_id = await DataEngine.schedule_withdrawal(
-        user_id=caller_id,
-        amount=session_variables["validated_volume"],
-        name=session_variables["validated_title"],
-        phone=session_variables["validated_phone"],
-        method=session_variables["selected_gateway"]
-    )
-    
-    await DataEngine.modify_balance(caller_id, -session_variables["validated_volume"])
+    ticket_id = await DataEngine.create_withdrawal(caller_id, s_data["validated_volume"], s_data["validated_title"], s_data["validated_phone"])
+    await DataEngine.add_balance(caller_id, -s_data["validated_volume"])
     await state.clear()
 
-    # INSTANT LOGGING TO PUBLIC CHANNEL NODE (FIXED: STRING CHAT_ID COMPATIBLE)
     channeled_post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
-            account_alias = f"@{user_live_profile['username']}" if user_live_profile.get('username') else "Private Profile"
-            broadcast_notification_text = (
+            alias = f"@{user['username']}" if user['username'] else "Private Profile"
+            post_text = (
                 f"⏳ <b>NEW WITHDRAWAL REQUEST LOGGED</b>\n\n"
-                f"👤 <b>User Node:</b> {session_variables['validated_title']} ({account_alias})\n"
-                f"💰 <b>Requested Amount:</b> <code>ETB {session_variables['validated_volume']:.2f}</code>\n"
+                f"👤 <b>User Node:</b> {s_data['validated_title']} ({alias})\n"
+                f"💰 <b>Requested Amount:</b> <code>ETB {s_data['validated_volume']:.2f}</code>\n"
                 f"📱 <b>Method:</b> <code>Telebirr Portal</code>\n"
                 f"📊 <b>Status:</b> <code>Pending Verification ⏳</code>\n\n"
                 f"⏰ <b>Timestamp:</b> <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>"
             )
-            broadcast_receipt = await bot.send_message(chat_id=PAYMENT_LOG_CHANNEL, text=broadcast_notification_text)
+            broadcast_receipt = await bot.send_message(chat_id=PAYMENT_LOG_CHANNEL, text=post_text)
             channeled_post_id = broadcast_receipt.message_id
-            await DataEngine.update_withdrawal_log(ticket_id, "pending", channeled_post_id)
-        except Exception as channel_post_error:
-            logger.error(f"Failed broadcasting transaction telemetry to public channel node: {channel_post_error}")
+            await DataEngine.update_withdrawal_status(ticket_id, "pending", channeled_post_id)
+        except Exception as e:
+            logger.error(f"Channel Broadcast Error: {e}")
 
-    admin_alert_markup = InlineKeyboardMarkup(inline_keyboard=[[
+    admin_markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Approve Ticket", callback_data=f"adm_payout_ap_{ticket_id}"),
         InlineKeyboardButton(text="❌ Deny Ticket", callback_data=f"adm_payout_rj_{ticket_id}")
     ]])
-    
-    for administrator_passport in ADMIN_IDS:
+    for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(
-                chat_id=administrator_passport,
-                text=f"📥 <b>Incoming Settlement Ticket #{ticket_id}</b>\n\nUser ID: <code>{caller_id}</code>\nVolume: <b>{session_variables['validated_volume']:.2f} Birr</b>",
-                reply_markup=admin_alert_markup
-            )
+            await bot.send_message(chat_id=admin_id, text=f"📥 <b>Incoming Ticket #{ticket_id}</b>\nVolume: <b>{s_data['validated_volume']:.2f} Birr</b>", reply_markup=admin_markup)
         except Exception:
             pass
 
-    # PROFESSIONAL TIME RESPONSE MATRIX (2 to 48 Hours Allocation)
-    user_success_response = (
-        "📨 <b>Withdrawal Request Submitted Successfully!</b>\n\n"
-        "Your transaction has been securely queued in our ecosystem. "
-        "Our financial administration team will review and audit your referral logs shortly.\n\n"
-        "⏳ <b>Estimated Processing Time:</b> <code>Within 2 to 48 Hours</code>\n\n"
-        "<i>Thank you for your patience! Updates will be automatically tracked in the official channel log.</i>"
-    )
-    await callback.message.edit_text(user_success_response, reply_markup=generate_dashboard_matrix(caller_id))
+    await callback.message.edit_text("📨 <b>Withdrawal Submitted!</b> Processing inside 2-48 hours. Updates are sent to our log channel.", reply_markup=generate_dashboard_matrix(caller_id))
 
 @core_router.callback_query(F.data.startswith("adm_payout_ap_"))
-async def process_admin_ticket_approval(callback: CallbackQuery):
-    if not evaluate_admin_access(callback.from_user.id):
-        return
+async def process_admin_approval(callback: CallbackQuery):
+    if not evaluate_admin_access(callback.from_user.id): return
+    ticket_id = int(callback.data.split("_")[3])
+    ticket = await DataEngine.get_withdrawal(ticket_id)
+    if not ticket or ticket["status"] != "pending": return await callback.answer("Processed already.")
         
-    extracted_parameters = callback.data.split("_")
-    ticket_id = int(extracted_parameters[3])
-    
-    withdrawal_record = await DataEngine.get_withdrawal_ticket(ticket_id)
-    if not withdrawal_record or withdrawal_record["status"] != "pending":
-        return await callback.answer("Ticket already processed by another terminal.")
-        
-    await DataEngine.update_withdrawal_log(ticket_id, "approved", withdrawal_record["channel_post_id"])
+    await DataEngine.update_withdrawal_status(ticket_id, "approved", ticket["channel_post_id"])
 
-    if PAYMENT_LOG_CHANNEL and withdrawal_record["channel_post_id"] != 0:
+    if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"] != 0:
         try:
-            success_channel_narration = (
+            channel_text = (
                 f"✅ <b>PAYOUT SETTLEMENT COMPLETED SUCCESSFULLY</b>\n\n"
-                f"🎉 The financial network has dispatched user allocations successfully.\n\n"
-                f"👤 <b>Recipient:</b> {withdrawal_record['full_name']}\n"
-                f"💰 <b>Settled Weight:</b> <code>ETB {withdrawal_record['amount']:.2f}</code>\n"
-                f"🚀 <b>Operational Registry:</b> Verified Success ✅\n\n"
-                f"🤖 <b>Bot Terminal:</b> @{(await bot.get_me()).username}"
+                f"👤 <b>Recipient:</b> {ticket['full_name']}\n"
+                f"💰 <b>Settled Weight:</b> <code>ETB {ticket['amount']:.2f}</code>\n"
+                f"🚀 <b>Operational Registry:</b> Verified Success ✅"
             )
-            await bot.send_photo(
-                chat_id=PAYMENT_LOG_CHANNEL,
-                photo=TELEBIRR_PROOF_IMAGE,
-                caption=success_channel_narration,
-                reply_to_message_id=withdrawal_record["channel_post_id"]
-            )
-        except Exception as threading_err:
-            logger.error(f"Failed to generate transactional reply metadata thread on node: {threading_err}")
+            await bot.send_photo(chat_id=PAYMENT_LOG_CHANNEL, photo=TELEBIRR_PROOF_IMAGE, caption=channel_text, reply_to_message_id=ticket["channel_post_id"])
+        except Exception as e:
+            logger.error(f"Channel photo confirmation failed: {e}")
 
     try:
-        await bot.send_message(withdrawal_record["user_id"], f"🎉 <b>Settlement Alert:</b> Your cashout request of {withdrawal_record['amount']:.2f} Birr has been successfully processed and sent!")
-    except Exception:
-        pass
-        
-    await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Result:</b> Approved & Threaded successfully.")
+        await bot.send_message(ticket["user_id"], f"🎉 Your cashout request of {ticket['amount']:.2f} Birr has been successfully processed!")
+    except Exception: pass
+    await callback.message.edit_text(callback.message.text + "\n\n✅ Approved.")
 
 @core_router.callback_query(F.data.startswith("adm_payout_rj_"))
-async def process_admin_ticket_rejection(callback: CallbackQuery):
-    if not evaluate_admin_access(callback.from_user.id):
-        return
-        
+async def process_admin_rejection(callback: CallbackQuery):
+    if not evaluate_admin_access(callback.from_user.id): return
     ticket_id = int(callback.data.split("_")[3])
-    withdrawal_record = await DataEngine.get_withdrawal_ticket(ticket_id)
-    
-    if not withdrawal_record or withdrawal_record["status"] != "pending":
-        return await callback.answer("Ticket neutralized or evaluated prior.")
+    ticket = await DataEngine.get_withdrawal(ticket_id)
+    if not ticket or ticket["status"] != "pending": return await callback.answer("Evaluated prior.")
         
-    await DataEngine.update_withdrawal_log(ticket_id, "rejected")
-    await DataEngine.modify_balance(withdrawal_record["user_id"], withdrawal_record["amount"])
-    
+    await DataEngine.update_withdrawal_status(ticket_id, "rejected")
+    await DataEngine.add_balance(ticket["user_id"], ticket["amount"])
     try:
-        await bot.send_message(withdrawal_record["user_id"], "❌ <b>Settlement Refusal:</b> Your cashout request was rejected. Assets have been returned to your wallet balance.")
-    except Exception:
-        pass
-        
-    await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Result:</b> Rejected & Assets Reversed.")
+        await bot.send_message(ticket["user_id"], "❌ Your withdrawal request was rejected. Assets returned.")
+    except Exception: pass
+    await callback.message.edit_text(callback.message.text + "\n\n❌ Rejected.")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ADMIN TERMINAL ROUTING & SYSTEM COMMAND ACTIONS
+# OPERATION TERMINALS (ADMIN CONTROL STRAT)
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_admin_core")
-async def process_admin_panel_hub(callback: CallbackQuery):
-    if not evaluate_admin_access(callback.from_user.id):
-        return
-    await callback.message.edit_text("⚙️ <b>Advanced Operational System Master Configuration</b>", reply_markup=generate_admin_dashboard())
+async def process_admin_panel(callback: CallbackQuery):
+    if evaluate_admin_access(callback.from_user.id):
+        await callback.message.edit_text("⚙️ <b>Operational Admin Master Engine</b>", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_add_mand")
-async def process_admin_add_mandatory_start(callback: CallbackQuery, state: FSMContext):
+async def process_add_channel_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.append_mandatory_id)
-    await callback.message.edit_text("🔴 <b>Enter Mandatory Target Channel ID (-100...):</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("🔴 <b>Enter Mandatory Channel ID (-100...):</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.append_mandatory_id)
-async def process_admin_add_mandatory_id(message: Message, state: FSMContext):
+async def process_add_channel_id(message: Message, state: FSMContext):
     await state.update_data(ch_id=message.text.strip())
     await state.set_state(AdminConsoleWorkflow.append_mandatory_title)
-    await message.answer("<b>Enter Channel Display Title:</b>")
+    await message.answer("<b>Enter Channel Title:</b>")
 
 @core_router.message(AdminConsoleWorkflow.append_mandatory_title)
-async def process_admin_add_mandatory_title(message: Message, state: FSMContext):
+async def process_add_channel_title(message: Message, state: FSMContext):
     await state.update_data(ch_title=message.text.strip())
     await state.set_state(AdminConsoleWorkflow.append_mandatory_url)
-    await message.answer("<b>Enter Public / Private Invite Link:</b>")
+    await message.answer("<b>Enter Public/Private Invite Link:</b>")
 
 @core_router.message(AdminConsoleWorkflow.append_mandatory_url)
-async def process_admin_add_mandatory_finalize(message: Message, state: FSMContext):
-    session_data = await state.get_data()
+async def process_add_channel_finalize(message: Message, state: FSMContext):
+    s_data = await state.get_data()
     await state.clear()
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        await conn.execute(
-            "INSERT INTO marketing_channels (channel_id, channel_name, invite_link, is_optional) VALUES (?, ?, ?, 0)",
-            (session_data["ch_id"], session_data["ch_title"], message.text.strip())
-        )
-        await conn.commit()
-    await message.answer("🔴 <b>Target Node Registered:</b> Compulsory join rule locked successfully.", reply_markup=generate_admin_dashboard())
-
-@core_router.callback_query(F.data == "adm_cmd_list_nodes")
-async def process_admin_channel_listing(callback: CallbackQuery):
-    node_collections = await extract_all_channels()
-    compilation_buffer = "📋 <b>Active Infrastructure Nodes Registry:</b>\n\n"
-    for counter, node in enumerate(node_collections, 1):
-        classification = "🟢 Optional Sneaky" if node["is_optional"] == 1 else "🔴 Mandatory Node"
-        compilation_buffer += f"{counter}. <b>{node['channel_name']}</b> ({classification})\nID: <code>{node['channel_id']}</code>\n\n"
-    await callback.message.edit_text(compilation_buffer, reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await DataEngine.add_force_channel(s_data["ch_id"], s_data["ch_title"], message.text.strip())
+    await message.answer("✅ Channel Locked Successfully.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_rm_node")
-async def process_admin_removal_menu(callback: CallbackQuery):
-    active_nodes = await extract_all_channels()
-    buttons_assembler = []
-    for node in active_nodes:
-        buttons_assembler.append([InlineKeyboardButton(text=f"🗑 Delete {node['channel_name']}", callback_data=f"execute_rm_node_{node['channel_id']}")])
-    buttons_assembler.append([InlineKeyboardButton(text="🔙 Back", callback_data="ui_admin_core")])
-    await callback.message.edit_text("<b>Select target node allocation to decouple:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons_assembler))
+async def process_rm_channel_menu(callback: CallbackQuery):
+    active = await DataEngine.get_force_channels()
+    buttons = []
+    for node in active:
+        buttons.append([InlineKeyboardButton(text=f"🗑 Delete {node['channel_name']}", callback_data=f"execute_rm_node_{node['channel_id']}")])
+    buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="ui_admin_core")])
+    await callback.message.edit_text("<b>Select channel to decouple:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 @core_router.callback_query(F.data.startswith("execute_rm_node_"))
-async def process_admin_removal_action(callback: CallbackQuery):
-    target_node_id = callback.data.replace("execute_rm_node_", "")
-    await DataEngine.unlink_channel(target_node_id)
-    await callback.message.edit_text("✅ Target entry dissociated completely.", reply_markup=generate_admin_dashboard())
+async def process_rm_channel_action(callback: CallbackQuery):
+    target = callback.data.replace("execute_rm_node_", "")
+    await DataEngine.remove_force_channel(target)
+    await callback.message.edit_text("✅ Decoupled successfully.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_edit_bal")
-async def process_admin_balance_modification_start(callback: CallbackQuery, state: FSMContext):
+async def process_edit_balance_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.direct_balance_target_id)
-    await callback.message.edit_text("<b>Enter Targeted Individual Telegram Identifier:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("<b>Enter Targeted Telegram User ID:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.direct_balance_target_id)
-async def process_admin_balance_modification_id(message: Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        return await message.answer("ID must be numeric.")
+async def process_edit_balance_id(message: Message, state: FSMContext):
     await state.update_data(target_uid=int(message.text.strip()))
     await state.set_state(AdminConsoleWorkflow.direct_balance_volume)
-    await message.answer("<b>Enter Ledger Adjustment Volume (e.g. 200 or -150):</b>")
+    await message.answer("<b>Enter Adjustment Volume (e.g. 50 or -20):</b>")
 
 @core_router.message(AdminConsoleWorkflow.direct_balance_volume)
-async def process_admin_balance_modification_finalize(message: Message, state: FSMContext):
-    session_data = await state.get_data()
+async def process_edit_balance_final(message: Message, state: FSMContext):
+    s_data = await state.get_data()
     await state.clear()
-    try:
-        parsed_delta = float(message.text.strip())
-        await DataEngine.modify_balance(session_data["target_uid"], parsed_delta)
-        await message.answer("✅ User financial ledger adjusted successfully.", reply_markup=generate_admin_dashboard())
-    except Exception as balance_err:
-        await message.answer(f"Operation failed due to numerical evaluation discrepancy: {balance_err}")
+    await DataEngine.add_balance(s_data["target_uid"], float(message.text.strip()))
+    await message.answer("✅ Ledger Adjusted.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_stats")
-async def process_admin_analytics(callback: CallbackQuery):
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute("SELECT COUNT(*) as population, SUM(balance) as capital FROM system_users") as u_cursor:
-            user_row = await u_cursor.fetchone()
-        async with conn.execute("SELECT COUNT(*) as volume FROM user_withdrawals WHERE status='approved'") as w_cursor:
-            withdrawal_row = await w_cursor.fetchone()
-            
-    analytics_template = (
-        f"📊 <b>Network Analytics Matrix Dashboard:</b>\n\n"
-        f"• Network Node Population: <b>{user_row['population'] or 0} active profiles</b>\n"
-        f"• Floating Asset Allocations: <b>{user_row['capital'] or 0:.2f} ETB</b>\n"
-        f"• Successful Payout Transactions: <b>{withdrawal_row['volume'] or 0} dispatches</b>"
-    )
-    await callback.message.edit_text(analytics_template, reply_markup=generate_fallback_navigation("ui_admin_core"))
+async def process_stats(callback: CallbackQuery):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT COUNT(*) as pop, SUM(balance) as cap FROM users")
+        u_row = await cur.fetchone()
+    await callback.message.edit_text(f"📊 <b>Analytics Matrix:</b>\n\n• Profiles: <b>{u_row['pop'] or 0} users</b>\n• Capital Vol: <b>{u_row['cap'] or 0:.2f} ETB</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.callback_query(F.data == "adm_cmd_broadcast")
-async def process_admin_broadcast_start(callback: CallbackQuery, state: FSMContext):
+async def process_broadcast_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.broadcast_intel_payload)
-    await callback.message.edit_text("📢 <b>Enter Information Payload for Global Transmission:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("📢 <b>Enter Broadcast Payload Text:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.broadcast_intel_payload)
-async def process_admin_broadcast_execute(message: Message, state: FSMContext):
-    broadcast_message_string = message.text
+async def process_broadcast_execute(message: Message, state: FSMContext):
+    text = message.text
     await state.clear()
-    progress_status_message = await message.answer("⏳ <b>Executing global dispatch stream...</b>")
-    
-    async with aiosqlite.connect(DATABASE_FILENAME) as conn:
-        conn.row_factory = aiosqlite.Row
-        async with conn.execute("SELECT user_id FROM system_users") as cursor:
-            global_user_nodes = await cursor.fetchall()
-            
-    success_dispatch_counter = 0
-    for node in global_user_nodes:
+    progress = await message.answer("⏳ Sending...")
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT user_id FROM users")
+        nodes = await cur.fetchall()
+    sc = 0
+    for node in nodes:
         try:
-            await bot.send_message(chat_id=node["user_id"], text=broadcast_message_string)
-            success_dispatch_counter += 1
+            await bot.send_message(chat_id=node["user_id"], text=text)
+            sc += 1
             await asyncio.sleep(0.04)
-        except Exception:
-            pass
-            
-    await progress_status_message.delete()
-    await message.answer(f"✅ <b>Global Transmission Dispatched:</b> Successfully reached {success_dispatch_counter} nodes.", reply_markup=generate_admin_dashboard())
+        except Exception: pass
+    await progress.delete()
+    await message.answer(f"✅ Dispatched to {sc} nodes.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_search")
-async def process_admin_search_start(callback: CallbackQuery, state: FSMContext):
+async def process_search_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.lookup_individual_id)
-    await callback.message.edit_text("🔍 <b>Enter User Telegram Passport Identity String:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("🔍 <b>Enter User Telegram ID:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.lookup_individual_id)
-async def process_admin_search_execute(message: Message, state: FSMContext):
-    input_string = message.text.strip()
+async def process_search_execute(message: Message, state: FSMContext):
     await state.clear()
-    if not input_string.isdigit():
-        return await message.answer("Invalid identity query configuration format.")
-        
-    user_record = await DataEngine.fetch_user(int(input_string))
-    if not user_record:
-        return await message.answer("Target user identity record not present inside system space.")
-        
-    compiled_result = (
-        f"👤 <b>User Node Metrics Profile:</b>\n\n"
-        f"• Passport Identity: <code>{user_record['user_id']}</code>\n"
-        f"• Base System Label: {user_record['full_name']}\n"
-        f"• System Username Alias: @{user_record['username'] or 'No Alias'}\n"
-        f"• Wallet Reserves: <b>{user_record['balance']:.2f} Birr</b>\n"
-        f"• Blacklist Quarantine Status: <b>{bool(user_record['is_banned'])}</b>"
-    )
-    await message.answer(compiled_result, reply_markup=generate_admin_dashboard())
+    user = await DataEngine.get_user(int(message.text.strip()))
+    if not user: return await message.answer("Record not found.")
+    await message.answer(f"👤 <b>Metrics Profile:</b>\n\n• Name: {user['full_name']}\n• Balance: <b>{user['balance']:.2f} Birr</b>\n• Banned: <b>{bool(user['is_banned'])}</b>", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_ban")
-async def process_admin_ban_start(callback: CallbackQuery, state: FSMContext):
+async def process_ban_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.banish_individual_id)
-    await callback.message.edit_text("🚫 <b>Enter Destination Target ID to Blacklist:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("🚫 <b>Enter ID to Ban:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.banish_individual_id)
-async def process_admin_ban_execute(message: Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        return await message.answer("Numeric format exception.")
-    await DataEngine.banish_user(int(message.text.strip()), 1)
+async def process_ban_execute(message: Message, state: FSMContext):
+    await DataEngine.ban_user(int(message.text.strip()), 1)
     await state.clear()
-    await message.answer("✅ Target identity block finalized. Permissions revoked.", reply_markup=generate_admin_dashboard())
+    await message.answer("✅ Targeted profile blocked.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_unban")
-async def process_admin_unban_start(callback: CallbackQuery, state: FSMContext):
+async def process_unban_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.pardon_individual_id)
-    await callback.message.edit_text("✅ <b>Enter Target Passport Identity to Pardon:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("✅ <b>Enter ID to Pardon:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.pardon_individual_id)
-async def process_admin_unban_execute(message: Message, state: FSMContext):
-    if not message.text.strip().isdigit():
-        return await message.answer("Numeric format exception.")
-    await DataEngine.banish_user(int(message.text.strip()), 0)
+async def process_unban_execute(message: Message, state: FSMContext):
+    await DataEngine.ban_user(int(message.text.strip()), 0)
     await state.clear()
-    await message.answer("✅ Target entity pardoned. Network access permissions reinstated.", reply_markup=generate_admin_dashboard())
+    await message.answer("✅ Pardoned successfully.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_reward")
-async def process_admin_reward_config_start(callback: CallbackQuery, state: FSMContext):
+async def process_reward_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.modify_referral_bounty)
-    await callback.message.edit_text("<b>Enter New Passive Reward Value Allocation:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("<b>Enter New Reward Allocation Value:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.modify_referral_bounty)
-async def process_admin_reward_config_execute(message: Message, state: FSMContext):
-    await DataEngine.write_config("reward_per_referral", message.text.strip())
+async def process_reward_execute(message: Message, state: FSMContext):
+    await DataEngine.set_setting("reward_per_referral", message.text.strip())
     await state.clear()
     await message.answer("✅ Reward system settings updated.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_min_wd")
-async def process_admin_min_wd_config_start(callback: CallbackQuery, state: FSMContext):
+async def process_min_wd_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminConsoleWorkflow.modify_minimum_cashout)
-    await callback.message.edit_text("<b>Enter New Global Network Minimum Cashout Weight:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("<b>Enter New Minimum Cashout Threshold:</b>", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.modify_minimum_cashout)
-async def process_admin_min_wd_config_execute(message: Message, state: FSMContext):
-    await DataEngine.write_config("min_withdrawal", message.text.strip())
+async def process_min_wd_execute(message: Message, state: FSMContext):
+    await DataEngine.set_setting("min_withdrawal", message.text.strip())
     await state.clear()
-    await message.answer("✅ Cashout threshold baseline configuration updated.", reply_markup=generate_admin_dashboard())
+    await message.answer("✅ Minimum baseline configuration updated.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_pending_tickets")
-async def process_admin_tickets_inventory(callback: CallbackQuery):
-    pending_tickets = await DataEngine.pull_pending_tickets()
-    if not pending_tickets:
-        return await callback.message.edit_text("<b>Zero Queue:</b> No active transactions demand settlement currently.", reply_markup=generate_admin_dashboard())
-    await callback.message.edit_text(f"📥 Found <b>{len(pending_tickets)} active queue ticket(s)</b>. Manage metrics inside admin log.", reply_markup=generate_admin_dashboard())
-
+async def process_pending_inventory(callback: CallbackQuery):
+    pending = await DataEngine.get_pending_withdrawals()
+    await callback.message.edit_text(f"📥 Found <b>{len(pending)} active queue ticket(s)</b>.", reply_markup=generate_admin_dashboard())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FASTAPI BACKEND INFRASTRUCTURE & ANTI-BOT WEbAPP REST GATEWAY
+# FASTAPI BACKEND SERVER MODULES
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def application_lifespan(app: FastAPI):
-    """Handles pipeline resource setup securely."""
     await DataEngine.init_database()
     asyncio.create_task(dp.start_polling(bot, skip_updates=True))
     yield
 
-# Native Application Setup
 api_platform = FastAPI(lifespan=application_lifespan)
 dp.include_router(core_router)
 
-# CORS Rules Implementation
 api_platform.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -939,70 +761,49 @@ api_platform.add_middleware(
 )
 
 @api_platform.get("/verify", response_class=HTMLResponse)
-async def serve_frontend_module(uid: int = 0, ref: int = 0):
-    """Hosts authentication template script direct from server memory stream."""
+async def serve_frontend(uid: int = 0, ref: int = 0):
     try:
         with open("index.html", "r") as storage_file:
-            loaded_html_payload = storage_file.read()
-        return HTMLResponse(content=loaded_html_payload.replace("__BACKEND_URL__", WEBAPP_URL))
-    except Exception as file_read_error:
-        raise HTTPException(status_code=500, detail=f"Mini App Template missing from local directory stream: {file_read_error}")
+            loaded_html = storage_file.read()
+        return HTMLResponse(content=loaded_html.replace("__BACKEND_URL__", WEBAPP_URL))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Frontend Template Missing: {e}")
 
 @api_platform.post("/api/verify")
-async def execute_secure_device_verification(request: Request):
-    """Evaluates telemetry fingerprints, client node IPs, and manages rewards."""
-    incoming_payload = await request.json()
-    telegram_metadata_node = parse_telegram_webapp_handshake(incoming_payload.get("initData", ""))
-    
-    if not telegram_metadata_node:
-        raise HTTPException(status_code=403, detail="Signature authentication breach.")
+async def execute_verification(request: Request):
+    incoming = await request.json()
+    tg_user = parse_telegram_webapp_handshake(incoming.get("initData", ""))
+    if not tg_user: raise HTTPException(status_code=403, detail="Signature breach.")
         
-    client_user_id = int(telegram_metadata_node["id"])
-    passed_referrer_id = int(incoming_payload.get("refId") or 0)
+    client_id = int(tg_user["id"])
+    ref_id = int(incoming.get("refId") or 0)
 
-    if await DataEngine.check_device_status(client_user_id):
+    if await DataEngine.is_verified(client_id):
         return JSONResponse({"status": "already_verified"})
 
-    # Execute Hybrid Anti-Clone Security Scan
-    is_cloned = await DataEngine.discover_clones(incoming_payload.get("ip", ""), incoming_payload.get("fingerprint", ""), client_user_id)
-    is_proxy_active = incoming_payload.get("isVpn") or await execute_network_vpn_lookup(incoming_payload.get("ip", ""))
+    is_cloned = await DataEngine.find_duplicate(incoming.get("ip", ""), incoming.get("fingerprint", ""), client_id)
+    is_vpn = incoming.get("isVpn") or await execute_network_vpn_lookup(incoming.get("ip", ""))
     
-    if is_cloned or is_proxy_active:
-        logger.warning(f"Quarantine executed on user node {client_user_id}. Proxy/Clone metrics true.")
-        await DataEngine.record_user(client_user_id, telegram_metadata_node.get("username", ""), telegram_metadata_node.get("first_name", ""))
-        await DataEngine.banish_user(client_user_id, 1)
+    if is_cloned or is_vpn:
+        await DataEngine.create_user(client_id, tg_user.get("username", ""), tg_user.get("first_name", ""))
+        await DataEngine.ban_user(client_id, 1)
         return JSONResponse({"status": "blocked"})
 
-    # Setup Profile Parameters
-    await DataEngine.record_user(client_user_id, telegram_metadata_node.get("username", ""), telegram_metadata_node.get("first_name", ""), passed_referrer_id or None)
-    await DataEngine.register_verification(client_user_id, incoming_payload.get("ip", ""), incoming_payload.get("fingerprint", ""), "MiniAppSecureModule")
+    await DataEngine.create_user(client_id, tg_user.get("username", ""), tg_user.get("first_name", ""), ref_id or None)
+    await DataEngine.save_verification(client_id, incoming.get("ip", ""), incoming.get("ua", ""), incoming.get("fingerprint", ""))
 
-    # Allocate Financial Bounty to Referrer
-    if passed_referrer_id and passed_referrer_id != client_user_id:
-        bounty_allocation = float(await DataEngine.read_config("reward_per_referral", "10"))
-        await DataEngine.modify_balance(passed_referrer_id, bounty_allocation)
+    if ref_id and ref_id != client_id:
+        bounty = float(await DataEngine.get_setting("reward_per_referral", "10"))
+        await DataEngine.add_balance(ref_id, bounty)
         try:
-            await bot.send_message(
-                chat_id=passed_referrer_id,
-                text=f"🎉 <b>Network Bounty Allocated!</b>\nYour referral connection successfully cleared registration. <code>+{bounty_allocation} Birr</code> credited."
-            )
-        except Exception:
-            pass
+            await bot.send_message(chat_id=ref_id, text=f"🎉 <b>Network Bounty!</b> Referral verified. <code>+{bounty} Birr</code> credited.")
+        except Exception: pass
 
     try:
-        await bot.send_message(
-            chat_id=client_user_id,
-            text="✅ <b>Verification Confirmed Successfully!</b>\nYour hardware signature has been signed. Access granted to the interface terminal.",
-            reply_markup=generate_dashboard_matrix(client_user_id)
-        )
-    except Exception:
-        pass
+        await bot.send_message(chat_id=client_id, text="✅ <b>Verification Confirmed!</b> Access granted.", reply_markup=generate_dashboard_matrix(client_id))
+    except Exception: pass
 
     return JSONResponse({"status": "verified"})
 
-# ─────────────────────────────────────────────────────────────────────────────
-# INFRASTRUCTURE START APPLICATION ENGINE ENTRYPOINT
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    logger.info("Spawning operational FastAPI server layers on port 8000...")
     uvicorn.run("bot:api_platform", host="0.0.0.0", port=8000, log_level="info")
