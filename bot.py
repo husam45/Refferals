@@ -1,7 +1,7 @@
 """
 bot.py – Telegram Referral Bot (Fully Featured & Comprehensive Edition)
 Flow: /start → Force Join Check → Mini App Verification → Reward & Unlock
-Features: Telebirr Integration, Advanced Admin Panel, User Balance Editor, Broadcast, Ban System, Stats
+Features: Telebirr Integration, Advanced Admin Panel, Auto-Fix User Balance Editor, Broadcast, Ban System, Stats
 """
 import os
 import asyncio
@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import logging
+import aiosqlite
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -46,7 +47,7 @@ PAYMENT_LOG_CH  = os.getenv("PAYMENT_LOG_CHANNEL", "")
 WEBAPP_URL      = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_KEY  = os.getenv("PROXYCHECK_API_KEY", "")
 
-# 🖼 የቴሌብር ፕሩፍ ፎቶ (አንተ የሰጠኸኝን 9881.jpg ምስል File ID ወይም URL እዚህ መጠቀም ትችላለህ)
+# 🖼 የቴሌብር ፕሩፍ ፎቶ URL
 TELEBIRR_PROOF_IMAGE = os.getenv("TELEBIRR_PROOF_IMAGE", "https://i.imgur.com/8bX9K4m.jpg")
 
 if WEBAPP_URL.startswith("tg56") or not WEBAPP_URL.startswith(("http://", "https://")):
@@ -71,11 +72,11 @@ class AdminState(StatesGroup):
     add_channel_name   = State()
     add_channel_link   = State()
     
-    # 🔍 1. የባላንስ ማስተካከያ ስቴቶች
+    # የባላንስ ማስተካከያ ስቴቶች
     edit_bal_uid       = State()
     edit_bal_amount    = State()
     
-    # 📢 የተሟሉ የአድሚን ስቴቶች (ኮዱን ትልቅ የሚያደርጉት)
+    # የአድሚን ስቴቶች
     broadcast_msg      = State()
     search_user_id     = State()
     ban_user_id        = State()
@@ -296,7 +297,7 @@ async def show_reflink(cb: CallbackQuery):
     await cb.answer()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 💸 2 & 3. Withdrawal Flow & Telebirr Setup
+# 💸 Withdrawal Flow & Telebirr Setup
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "withdraw")
 async def withdraw_start(cb: CallbackQuery, state: FSMContext):
@@ -426,7 +427,7 @@ async def wd_confirm(cb: CallbackQuery, state: FSMContext):
     await cb.answer("ጥያቄዎ ተመዝግቧል!")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🖼 4. Withdrawal Approval with Image Proof
+# Withdrawal Approval with Image Proof
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("wd_approve_"))
 async def wd_approve(cb: CallbackQuery):
@@ -474,7 +475,7 @@ async def wd_reject(cb: CallbackQuery):
     await cb.answer("Rejected ❌")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🛠 1. Advanced Admin Panel Engine & User Balance Editor
+# 🛠 Advanced Admin Panel Engine & Auto-Fix User Balance Editor
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin_panel")
 async def admin_panel_callback(cb: CallbackQuery, state: FSMContext):
@@ -499,13 +500,22 @@ async def admin_edit_balance_uid(msg: Message, state: FSMContext):
     if not target_uid.isdigit():
         return await msg.answer("❌ እባክዎ ትክክለኛ የቁጥር ID ያስገቡ።")
     
-    user = await db.get_user(int(target_uid))
+    target_id_int = int(target_uid)
+    user = await db.get_user(target_id_int)
+    
+    # ✨ ማስተካከያ፦ ተጠቃሚው በዳታቤዝ ውስጥ ከሌለ በራሱ ጊዜ በቁጥሩ ይመዘግበዋል (የ"አልተገኘም" ስህተትን ይፈታል)
     if not user:
-        return await msg.answer("❌ ይህ ተጠቃሚ በዳታቤዙ ውስጥ አልተገኘም።")
+        await db.create_user(user_id=target_id_int, username="Manual_Add", full_name="👤 Manual User", referred_by=None)
+        user = await db.get_user(target_id_int)
         
-    await state.update_data(target_uid=int(target_uid))
+    await state.update_data(target_uid=target_id_int)
     await state.set_state(AdminState.edit_bal_amount)
-    await msg.answer(f"👤 ተጠቃሚ፦ <b>{user['full_name']}</b>\n💰 የአሁኑ ባላንስ፦ <b>{user['balance']:.2f} Birr</b>\n\nለመጨመር ፖዘቲቭ ቁጥር (ምሳሌ 50)፣ ለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -20) ያስገቡ፦")
+    await msg.answer(
+        f"👤 ተጠቃሚ፦ <b>{user['full_name']}</b>\n"
+        f"🆔 ID፦ <code>{user['user_id']}</code>\n"
+        f"💰 የአሁኑ ባላንስ፦ <b>{user['balance']:.2f} Birr</b>\n\n"
+        f"ለመጨመር ፖዘቲቭ ቁጥር (ምሳሌ 100)፣ ለመቀነስ የኔጋቲቭ ቁጥር (ምሳሌ -50) ያስገቡ፦"
+    )
 
 @router.message(AdminState.edit_bal_amount)
 async def admin_edit_balance_amount(msg: Message, state: FSMContext):
@@ -532,7 +542,7 @@ async def admin_edit_balance_amount(msg: Message, state: FSMContext):
     except Exception: pass
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📊 Extended Admin Features (Statistics, Broadcast & Search Engine)
+# 📊 Statistics, Broadcast & Search Engine
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats(cb: CallbackQuery):
@@ -561,7 +571,7 @@ async def admin_stats(cb: CallbackQuery):
 async def admin_broadcast_start(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return await cb.answer("⛔", show_alert=True)
     await state.set_state(AdminState.broadcast_msg)
-    await cb.message.edit_text("📢 <b>Broadcast Engine</b>\n\nለሁሉም የቦቱ ተጠቃሚዎች በአንድ ጊዜ ለመላክ የሚፈልጉትን መልዕክት (Text / HTML) ይጻፉ፦", reply_markup=back_kb("admin_panel"))
+    await cb.message.edit_text("📢 <b>Broadcast Engine</b>\n\nለሁሉም የቦቱ ተጠቃሚዎች በአንድ ጊዜ ለመላክ የሚፈልጉትን መልዕክት ይጻፉ፦", reply_markup=back_kb("admin_panel"))
     await cb.answer()
 
 @router.message(AdminState.broadcast_msg)
@@ -569,7 +579,7 @@ async def admin_broadcast_send(msg: Message, state: FSMContext):
     if not is_admin(msg.from_user.id): return
     broadcast_text = msg.text
     await state.clear()
-    await msg.answer("⏳ Broadcast ተጀምሯል... ይህ የተወሰነ ሰከንድ/ደቂቃ ሊወስድ ይችላል።")
+    await msg.answer("⏳ Broadcast ተጀምሯል...")
     
     async with aiosqlite.connect(db.DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
@@ -581,17 +591,17 @@ async def admin_broadcast_send(msg: Message, state: FSMContext):
         try:
             await bot.send_message(u["user_id"], broadcast_text)
             success += 1
-            await asyncio.sleep(0.05) # ፍጥነትን ለመቆጣጠር (Flood Control)
+            await asyncio.sleep(0.05)
         except Exception:
             failed += 1
             
-    await msg.answer(f"📢 <b>Broadcast የተጠናቀቀ ሪፖርት</b>\n\n✅ በተሳካ ሁኔታ የተላከላቸው: <b>{success}</b>\n❌ ያልተላከላቸው (Bot Blocked): <b>{failed}</b>", reply_markup=admin_panel_kb())
+    await msg.answer(f"📢 <b>Broadcast ሪፖርት</b>\n\n✅ የተላከላቸው: <b>{success}</b>\n❌ ያልተላከላቸው: <b>{failed}</b>", reply_markup=admin_panel_kb())
 
 @router.callback_query(F.data == "admin_search_user")
 async def admin_search_start(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return await cb.answer("⛔", show_alert=True)
     await state.set_state(AdminState.search_user_id)
-    await cb.message.edit_text("🔍 <b>Search User</b>\n\nለመፈለግ የሚፈልጉትን የተጠቃሚ <b>Telegram User ID</b> ያስገቡ፦", reply_markup=back_kb("admin_panel"))
+    await cb.message.edit_text("🔍 <b>Search User</b>\n\nለመፈለግ የሚፈልጉትን የተጠቃሚ <b>Telegram ID</b> ያስገቡ፦", reply_markup=back_kb("admin_panel"))
     await cb.answer()
 
 @router.message(AdminState.search_user_id)
@@ -621,7 +631,7 @@ async def admin_search_result(msg: Message, state: FSMContext):
     await msg.answer(text, reply_markup=admin_panel_kb())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🚫 Advanced Ban / Unban Engine
+# Ban / Unban Engine
 # ─────────────────────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "admin_ban_user")
 async def admin_ban_start(cb: CallbackQuery, state: FSMContext):
@@ -642,7 +652,7 @@ async def admin_ban_exec(msg: Message, state: FSMContext):
     if not user: return await msg.answer("❌ ተጠቃሚው አልተገኘም።")
     
     await db.ban_user(uid)
-    await msg.answer(f"🚫 ተጠቃሚው <b>{user['full_name']}</b> [<code>{uid}</code>] በተሳካ ሁኔታ ታግዷል።", reply_markup=admin_panel_kb())
+    await msg.answer(f"🚫 ተጠቃሚው <b>{user['full_name']}</b> [<code>{uid}</code>] ታግዷል።", reply_markup=admin_panel_kb())
 
 @router.callback_query(F.data == "admin_unban_user")
 async def admin_unban_start(cb: CallbackQuery, state: FSMContext):
@@ -663,7 +673,7 @@ async def admin_unban_exec(msg: Message, state: FSMContext):
         await conn.execute("UPDATE users SET is_banned = 0 WHERE user_id = ?", (uid,))
         await conn.commit()
         
-    await msg.answer(f"✅ የተጠቃሚ ID <code>{uid}</code> እገዳ በተሳካ ሁኔታ ተነስቷል።", reply_markup=admin_panel_kb())
+    await msg.answer(f"✅ የተጠቃሚ ID <code>{uid}</code> እገዳ ተነስቷል።", reply_markup=admin_panel_kb())
 
 # ─────────────────────────────────────────────────────────────────────────────
 # System Settings & Channel Operations
@@ -781,7 +791,6 @@ async def admin_pending_wd(cb: CallbackQuery):
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    import aiosqlite
     await db.init_db()
     asyncio.create_task(start_bot())
     yield
@@ -849,7 +858,6 @@ async def api_verify(request: Request):
 
     return JSONResponse({"status": "verified"})
 
-import aiosqlite
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(router)
 
