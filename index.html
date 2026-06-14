@@ -237,9 +237,10 @@ h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
 const BACKEND = "__BACKEND_URL__";
 const params  = new URLSearchParams(location.search);
 
-// 🔍 FIXED: ከሊንኩ ላይ uid እና refId በትክክል ወደ ቁጥር ተቀይረው እንዲነበቡ ተደርጓል
+// 🔍 FIXED: ከሊንኩ ላይ uid፣ refId እና msg_id በትክክል እንዲነበቡ ተደርጓል
 const UID     = parseInt(params.get("uid") || "0");
 const REF_ID  = parseInt(params.get("ref") || "0");
+const MSG_ID  = parseInt(params.get("msg_id") || "0"); // አዲሱ የሜሴጅ ማጥፊያ ID
 
 const tg = window.Telegram?.WebApp;
 if(tg){ tg.ready(); tg.expand(); }
@@ -406,13 +407,14 @@ async function submit(ip, isVpn, fp){
   document.getElementById("i4").textContent="Sending to server…";
   setBar(90);
 
-  // 🔍 FIXED: uid እና refId በትክክል ወደ ጃሰን ቦዲው እንዲካተቱ ተደርጓል
+  // 🔍 FIXED: msgId አብሮ ወደ backend እንዲላክ ተደርጓል
   const res = await fetch(`${BACKEND}/api/verify`,{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({
       uid: UID,
       refId: REF_ID,
+      msgId: MSG_ID, // የቦቱ መልእክት በፍጥነት እንዲጠፋ ይህ ወሳኝ ነው
       initData, ip,
       userAgent:navigator.userAgent,
       fingerprint:fp,
