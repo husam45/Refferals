@@ -1,6 +1,6 @@
 """
-database.py – async SQLite (aiosqlite) data layer.
-Fully optimized to prevent caching issues and accurately update balances.
+database.py – Full Async SQLite (aiosqlite) data layer.
+Optimized with WAL mode and robust error handling to prevent database locks.
 """
 import os
 import json
@@ -12,10 +12,11 @@ if DB_PATH.startswith("postgres"):
     DB_PATH = "referral_bot.db"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Schema
+# Schema Definition
 # ─────────────────────────────────────────────────────────────────────────────
 SCHEMA = """
 PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
 
 CREATE TABLE IF NOT EXISTS users (
     user_id        INTEGER PRIMARY KEY,
@@ -42,7 +43,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     amount         REAL,
     full_name      TEXT,
     phone          TEXT,
-    status         TEXT    DEFAULT 'pending',
+    status         TEXT    DEFAULT 'pending',   -- pending | approved | rejected
     created_at     TEXT    DEFAULT (datetime('now')),
     resolved_at    TEXT
 );
@@ -59,17 +60,19 @@ CREATE TABLE IF NOT EXISTS settings (
     value          TEXT
 );
 
+-- Seed defaults
 INSERT OR IGNORE INTO settings (key, value) VALUES ('reward_per_referral', '10');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('min_withdrawal', '50');
 """
 
 async def init_db():
+    """ዳታቤዙን ይፈጥራል፣ ቴብሎችን ያዘጋጃል"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(SCHEMA)
         await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Users Engine
+# Users Management
 # ─────────────────────────────────────────────────────────────────────────────
 async def get_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -86,25 +89,14 @@ async def create_user(user_id: int, username: str, full_name: str, referred_by: 
         )
         await db.commit()
 
-async def add_balance(user_id: int, amount: float) -> float:
-    """ባላንስ ጨምሮ ወይም ቀንሶ አዲሱን የመጨረሻ ባላንስ ይመልሳል (Real-time update)"""
+async def add_balance(user_id: int, amount: float):
+    """የተጠቃሚውን ባላንስ በቀጥታ በዳታቤዙ ላይ ይጨምራል/ይቀንሳል"""
     async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        # 1. የአሁኑን ባላንስ ማውጣት
-        cur = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-        row = await cur.fetchone()
-        current_balance = row["balance"] if row else 0.0
-        
-        # 2. አዲሱን ባላንስ ማስላት
-        new_balance = current_balance + amount
-        
-        # 3. በዳታቤዙ ላይ ማዘመን
         await db.execute(
-            "UPDATE users SET balance = ? WHERE user_id = ?",
-            (new_balance, user_id),
+            "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+            (amount, user_id),
         )
         await db.commit()
-        return new_balance
 
 async def get_referral_count(user_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -120,7 +112,7 @@ async def ban_user(user_id: int):
         await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Verifications Engine
+# Verifications Management
 # ─────────────────────────────────────────────────────────────────────────────
 async def is_verified(user_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -152,7 +144,7 @@ async def save_verification(user_id: int, ip: str, ua: str, fingerprint: str):
         await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Withdrawals Engine
+# Withdrawals Management
 # ─────────────────────────────────────────────────────────────────────────────
 async def create_withdrawal(user_id: int, amount: float, full_name: str, phone: str) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -187,7 +179,7 @@ async def update_withdrawal_status(wid: int, status: str):
         await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Force-join Channels Engine
+# Force-join Channels Management
 # ─────────────────────────────────────────────────────────────────────────────
 async def add_force_channel(channel_id: str, channel_name: str, invite_link: str):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -212,7 +204,7 @@ async def get_force_channels():
         return await cur.fetchall()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Settings Engine
+# Settings Management
 # ─────────────────────────────────────────────────────────────────────────────
 async def get_setting(key: str, default=None):
     async with aiosqlite.connect(DB_PATH) as db:
