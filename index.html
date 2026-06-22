@@ -3,468 +3,286 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<title>Verify</title>
+<title>Security Verification</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-/* ── Tokens ─────────────────────────────────────── */
 :root{
-  --bg:      #0b0e17;
-  --card:    #131929;
-  --border:  #1e2840;
-  --blue:    #4f8ef7;
-  --blue2:   #2563eb;
-  --green:   #22c55e;
-  --red:     #ef4444;
-  --text:    #e8edf5;
-  --muted:   #57657f;
-  --r:       20px;
+  --bg:#08090d;
+  --ink:#0e1016;
+  --amber:#f5b942;--emerald:#34e2a1;--indigo:#6c7bff;--rose:#ff6b8a;
+  --green:#2ee68a;--red:#ff4d5e;
+  --text:#f7f8fb;--muted:#6b7080;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Inter',system-ui,sans-serif;
+  color:var(--text);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+
+/* faint vignette */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;
+  background:radial-gradient(circle at 50% 30%, rgba(108,123,255,.08), transparent 60%);
 }
 
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{
-  height:100%;background:var(--bg);
-  font-family:'Inter',system-ui,sans-serif;
-  color:var(--text);
-  display:flex;align-items:center;justify-content:center;
-  overflow:hidden;
+/* ── Animated gradient-border card (Linear/Vercel style) ──────────────── */
+.border-wrap{
+  position:relative;z-index:1;width:calc(100% - 36px);max-width:368px;
+  border-radius:26px;padding:1.5px;
+  background:conic-gradient(from var(--angle), var(--amber), var(--emerald), var(--indigo), var(--rose), var(--amber));
+  animation:rotateBorder 5s linear infinite;
+  box-shadow:0 30px 80px -25px rgba(0,0,0,.8);
 }
+@property --angle{syntax:'<angle>';initial-value:0deg;inherits:false;}
+@keyframes rotateBorder{to{--angle:360deg;}}
+.border-wrap.done{background:var(--green);animation:none;}
+.border-wrap.fail{background:var(--red);animation:none;}
 
-/* ── Card ───────────────────────────────────────── */
 .card{
-  width:calc(100% - 32px);max-width:360px;
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:var(--r);
-  padding:32px 24px 28px;
-  text-align:center;
-  position:relative;
-  overflow:hidden;
+  background:linear-gradient(165deg, #12141d, #0a0b11);
+  border-radius:24.5px;
+  padding:38px 26px 0;text-align:center;overflow:hidden;position:relative;
+  animation:rise .5s cubic-bezier(.16,1,.3,1);
 }
-/* subtle top glow */
-.card::before{
-  content:'';
-  position:absolute;top:-60px;left:50%;transform:translateX(-50%);
-  width:200px;height:120px;
-  background:radial-gradient(ellipse,rgba(79,142,247,.18) 0%,transparent 70%);
-  pointer-events:none;
-}
+@keyframes rise{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:translateY(0);}}
+@keyframes shakeFail{0%,100%{transform:translateX(0);}20%{transform:translateX(-7px);}40%{transform:translateX(6px);}60%{transform:translateX(-4px);}80%{transform:translateX(3px);}}
+.card.shake{animation:shakeFail .45s ease;}
+.card.bounce{animation:cardBounce .4s cubic-bezier(.34,1.56,.64,1);}
+@keyframes cardBounce{0%{transform:scale(1);}50%{transform:scale(1.025);}100%{transform:scale(1);}}
 
-/* ── Icon ring ──────────────────────────────────── */
-.icon-wrap{
-  width:72px;height:72px;
-  margin:0 auto 20px;
-  border-radius:50%;
+/* ── Squircle icon container ──────────────────────────────────────── */
+.squircle-zone{width:100%;height:118px;margin-bottom:22px;position:relative;display:flex;align-items:center;justify-content:center;}
+
+.squircle{
+  width:88px;height:88px;border-radius:26px;position:relative;
+  background:linear-gradient(160deg, rgba(255,255,255,.07), rgba(255,255,255,.015));
+  border:1px solid rgba(255,255,255,.09);
   display:flex;align-items:center;justify-content:center;
-  position:relative;
-  background:rgba(79,142,247,.1);
-  border:1.5px solid rgba(79,142,247,.3);
-  transition:background .4s,border-color .4s;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.08), 0 16px 40px -16px rgba(0,0,0,.6);
+  transition:transform .35s,border-color .35s;
 }
-.icon-wrap.done {background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.35);}
-.icon-wrap.fail {background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.35);}
+.squircle.done{border-color:rgba(46,230,138,.5);transform:scale(1.08) rotate(0deg);}
+.squircle.fail{border-color:rgba(255,77,94,.5);}
+.squircle svg{width:38px;height:38px;}
 
-.icon-wrap svg{width:34px;height:34px;transition:opacity .3s;}
+@keyframes pulseGlow{0%,100%{opacity:.65;}50%{opacity:1;}}
+#svgShield{animation:pulseGlow 1.6s ease-in-out infinite;}
 
-/* Scanning ring animation */
-@keyframes scan{
-  0%  {transform:rotate(0deg)  scale(1);  opacity:.6;}
-  50% {transform:rotate(180deg) scale(1.1);opacity:1;}
-  100%{transform:rotate(360deg) scale(1);  opacity:.6;}
+@keyframes draw{from{stroke-dashoffset:48;}to{stroke-dashoffset:0;}}
+#checkPath{stroke-dasharray:48;stroke-dashoffset:48;}
+.squircle.done #checkPath{animation:draw .5s cubic-bezier(.4,0,.2,1) forwards .1s;}
+
+@keyframes popX{0%{transform:scale(0) rotate(-40deg);opacity:0;}70%{transform:scale(1.25) rotate(6deg);}100%{transform:scale(1) rotate(0);opacity:1;}}
+.squircle.fail svg{animation:popX .45s cubic-bezier(.34,1.56,.64,1);}
+
+/* corner accent dots orbiting the squircle while scanning */
+.orbit-dot{position:absolute;width:7px;height:7px;border-radius:50%;}
+.orbit-dot.d1{background:var(--amber);top:0;left:50%;transform:translateX(-50%);animation:orbit1 2.4s linear infinite;}
+.orbit-dot.d2{background:var(--emerald);top:50%;right:0;transform:translateY(-50%);animation:orbit2 2.4s linear infinite;}
+.orbit-dot.d3{background:var(--indigo);bottom:0;left:50%;transform:translateX(-50%);animation:orbit3 2.4s linear infinite;}
+@keyframes orbit1{0%,100%{opacity:.3;}50%{opacity:1;}}
+@keyframes orbit2{0%,100%{opacity:1;}50%{opacity:.3;}}
+@keyframes orbit3{0%,100%{opacity:.5;}50%{opacity:1;}}
+.squircle-zone.resolved .orbit-dot{display:none;}
+
+/* success burst rings */
+.burst span{
+  position:absolute;inset:0;margin:auto;width:88px;height:88px;border-radius:26px;
+  border:2px solid var(--green);opacity:0;left:50%;top:50%;transform:translate(-50%,-50%) scale(1);
 }
-.ring{
-  position:absolute;inset:-6px;
-  border-radius:50%;
-  border:2px solid transparent;
-  border-top-color:var(--blue);
-  border-right-color:rgba(79,142,247,.3);
-  animation:scan 1.2s linear infinite;
-}
-.icon-wrap.done .ring,
-.icon-wrap.fail .ring{display:none;}
+.burst.go span{animation:burstOut .9s ease-out forwards;}
+.burst.go span:nth-child(2){animation-delay:.15s;}
+.burst.go span:nth-child(3){animation-delay:.3s;}
+@keyframes burstOut{0%{opacity:.8;transform:translate(-50%,-50%) scale(1);}100%{opacity:0;transform:translate(-50%,-50%) scale(1.9);}}
 
-/* ── Title ──────────────────────────────────────── */
-h2{font-size:1.2rem;font-weight:700;letter-spacing:-.02em;margin-bottom:6px;}
-.sub{font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:26px;}
+.confetti-dot{position:absolute;width:6px;height:6px;border-radius:50%;left:50%;top:50%;opacity:0;pointer-events:none;}
+.confetti-dot.go{animation:flyOut .7s ease-out forwards;}
+@keyframes flyOut{0%{opacity:1;transform:translate(-50%,-50%) scale(1);}100%{opacity:0;transform:translate(var(--tx),var(--ty)) scale(.3);}}
 
-/* ── Progress bar ───────────────────────────────── */
-.bar-track{
-  height:4px;background:var(--border);border-radius:2px;
-  margin-bottom:22px;overflow:hidden;
-}
-.bar-fill{
-  height:100%;width:0%;
-  background:linear-gradient(90deg,var(--blue2),var(--blue));
-  border-radius:2px;
-  transition:width .4s ease;
-}
-.bar-fill.done {background:var(--green);width:100%!important;}
-.bar-fill.fail {background:var(--red);  width:100%!important;}
+h2{font-size:1.3rem;font-weight:800;letter-spacing:-.02em;margin-bottom:7px;}
 
-/* ── Steps ──────────────────────────────────────── */
-.steps{display:flex;flex-direction:column;gap:8px;margin-bottom:24px;}
-
-.step{
-  display:flex;align-items:center;gap:12px;
-  padding:11px 14px;
-  background:rgba(255,255,255,.03);
-  border:1px solid var(--border);
-  border-radius:12px;
-  text-align:left;
-  transition:border-color .3s,background .3s;
+.status-line{position:relative;height:20px;margin-bottom:24px;overflow:hidden;}
+.status-line span{
+  position:absolute;left:0;right:0;font-size:.83rem;color:var(--muted);font-weight:500;
+  opacity:0;transform:translateY(8px);transition:opacity .35s,transform .35s;
 }
-.step.active{
-  border-color:rgba(79,142,247,.5);
-  background:rgba(79,142,247,.06);
-}
-.step.ok  {border-color:rgba(34,197,94,.4);}
-.step.err {border-color:rgba(239,68,68,.4);}
+.status-line span.show{opacity:1;transform:translateY(0);}
 
-.step-dot{
-  width:26px;height:26px;flex-shrink:0;
-  border-radius:50%;
-  background:var(--border);
-  display:flex;align-items:center;justify-content:center;
-  font-size:.72rem;font-weight:700;
-  transition:background .3s;
-}
-.step.active .step-dot{background:var(--blue);}
-.step.ok     .step-dot{background:var(--green);}
-.step.err    .step-dot{background:var(--red);}
+/* top-edge progress strip (full bleed, sits above content) */
+.bar-track{height:3px;background:rgba(255,255,255,.06);margin:0 -26px 28px;position:relative;overflow:hidden;}
+.bar-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--amber),var(--emerald),var(--indigo));
+  transition:width .4s cubic-bezier(.4,0,.2,1);}
+.bar-fill.done{background:var(--green);width:100%!important;}
+.bar-fill.fail{background:var(--red);width:100%!important;}
 
-.step-body{flex:1;}
-.step-title{font-size:.82rem;font-weight:600;color:var(--text);}
-.step-info {font-size:.72rem;color:var(--muted);margin-top:1px;
-            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.pill{margin:0 0 18px;padding:12px 16px;border-radius:13px;font-size:.83rem;font-weight:700;line-height:1.4;
+  display:none;animation:popX .4s cubic-bezier(.34,1.56,.64,1);}
+.pill.ok{display:block;background:rgba(46,230,138,.1);color:var(--green);border:1px solid rgba(46,230,138,.3);}
+.pill.err{display:block;background:rgba(255,77,94,.1);color:var(--red);border:1px solid rgba(255,77,94,.3);}
 
-/* mini spinner */
-@keyframes spin{to{transform:rotate(360deg)}}
-.sp{
-  width:14px;height:14px;flex-shrink:0;
-  border:2px solid rgba(79,142,247,.2);
-  border-top-color:var(--blue);
-  border-radius:50%;
-  animation:spin .7s linear infinite;
-}
-.step.ok .sp,.step.err .sp{display:none;}
-
-/* ── Result pill ────────────────────────────────── */
-.pill{
-  display:none;
-  padding:13px 16px;
-  border-radius:12px;
-  font-size:.85rem;
-  font-weight:600;
-  line-height:1.45;
-}
-.pill.ok  {display:block;background:rgba(34,197,94,.1);
-           color:var(--green);border:1px solid rgba(34,197,94,.3);}
-.pill.err {display:block;background:rgba(239,68,68,.1);
-           color:var(--red);  border:1px solid rgba(239,68,68,.3);}
+.footer{padding:0 0 22px;font-size:.63rem;color:var(--muted);line-height:1.5;opacity:.65;}
 </style>
 </head>
 <body>
-<div class="card">
 
-  <div class="icon-wrap" id="iconWrap">
-    <div class="ring" id="ring"></div>
-    <svg id="svgShield" viewBox="0 0 24 24" fill="none"
-         stroke="#4f8ef7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-      <polyline points="9 12 11 14 15 10"/>
-    </svg>
-    <svg id="svgCheck" viewBox="0 0 24 24" fill="none" style="display:none"
-         stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <polyline points="7 12 10.5 15.5 17 9"/>
-    </svg>
-    <svg id="svgX" viewBox="0 0 24 24" fill="none" style="display:none"
-         stroke="#ef4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="15" y1="9" x2="9" y2="15"/>
-      <line x1="9" y1="9" x2="15" y2="15"/>
-    </svg>
+<div class="border-wrap" id="borderWrap">
+  <div class="card" id="card">
+
+    <div class="squircle-zone" id="squircleZone">
+      <div class="orbit-dot d1"></div>
+      <div class="orbit-dot d2"></div>
+      <div class="orbit-dot d3"></div>
+      <div class="burst" id="burst"><span></span><span></span><span></span></div>
+      <div class="squircle" id="squircle">
+        <svg id="svgShield" viewBox="0 0 24 24" fill="none" stroke="#f5b942" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <svg id="svgCheck" viewBox="0 0 24 24" fill="none" stroke="#2ee68a" stroke-width="2.6"
+             stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <polyline id="checkPath" points="4 12 9.5 17.5 20 6"/>
+        </svg>
+        <svg id="svgX" viewBox="0 0 24 24" fill="none" stroke="#ff4d5e" stroke-width="2.6"
+             stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>
+        </svg>
+      </div>
+    </div>
+
+    <h2 id="mainTitle">Verifying You</h2>
+    <div class="status-line">
+      <span class="show" id="st1">Checking your network…</span>
+      <span id="st2">Scanning for VPN / proxy…</span>
+      <span id="st3">Generating device signature…</span>
+      <span id="st4">Finalizing with server…</span>
+      <span id="stDoneOk">Checking your account…</span>
+      <span id="stDoneFail">Please review and try again…</span>
+    </div>
+
+    <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
+    <div class="pill" id="pill"></div>
+    <p class="footer">Your data only prevents multi-accounting.<br>Never shared with third parties.</p>
   </div>
-
-  <h2 id="mainTitle">Security Check</h2>
-  <p class="sub" id="mainSub">Verifying your identity…</p>
-
-  <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
-
-  <div class="steps">
-
-    <div class="step active" id="s1">
-      <div class="step-dot" id="d1">1</div>
-      <div class="step-body">
-        <div class="step-title">Network</div>
-        <div class="step-info" id="i1">Fetching IP…</div>
-      </div>
-      <div class="sp" id="sp1"></div>
-    </div>
-
-    <div class="step" id="s2">
-      <div class="step-dot" id="d2">2</div>
-      <div class="step-body">
-        <div class="step-title">VPN / Proxy</div>
-        <div class="step-info" id="i2">Waiting…</div>
-      </div>
-    </div>
-
-    <div class="step" id="s3">
-      <div class="step-dot" id="d3">3</div>
-      <div class="step-body">
-        <div class="step-title">Device ID</div>
-        <div class="step-info" id="i3">Waiting…</div>
-      </div>
-    </div>
-
-    <div class="step" id="s4">
-      <div class="step-dot" id="d4">4</div>
-      <div class="step-body">
-        <div class="step-title">Final Check</div>
-        <div class="step-info" id="i4">Waiting…</div>
-      </div>
-    </div>
-
-  </div>
-
-  <div class="pill" id="pill"></div>
-
 </div>
-<script>
-/* ═══════════════════════════════════════════════
-   Config
-═══════════════════════════════════════════════ */
-const BACKEND = "__BACKEND_URL__";
-const params  = new URLSearchParams(location.search);
 
-// 🔍 FIXED: ከሊንኩ ላይ uid፣ refId እና msg_id በትክክል እንዲነበቡ ተደርጓል
-const UID     = parseInt(params.get("uid") || "0");
-const REF_ID  = parseInt(params.get("ref") || "0");
-const MSG_ID  = parseInt(params.get("msg_id") || "0"); // አዲሱ የሜሴጅ ማጥፊያ ID
+<script>
+const BACKEND = "__BACKEND_URL__";
+const p = new URLSearchParams(location.search);
+const REF_ID = p.get("ref") || "0";
+const MSG_ID = p.get("msg_id") || "0";
 
 const tg = window.Telegram?.WebApp;
 if(tg){ tg.ready(); tg.expand(); }
 const initData = tg?.initData || "";
 
-/* ═══════════════════════════════════════════════
-   UI helpers
-═══════════════════════════════════════════════ */
-const bar   = document.getElementById("bar");
-const pill  = document.getElementById("pill");
-const iWrap = document.getElementById("iconWrap");
+const bar=document.getElementById("bar");
+const pill=document.getElementById("pill");
+const card=document.getElementById("card");
+const borderWrap=document.getElementById("borderWrap");
+const squircle=document.getElementById("squircle");
+const squircleZone=document.getElementById("squircleZone");
+const burst=document.getElementById("burst");
+const setBar=pct=>bar.style.width=pct+"%";
 
-function setBar(pct){ bar.style.width = pct + "%"; }
+function setStatus(id){
+  document.querySelectorAll(".status-line span").forEach(s=>s.classList.remove("show"));
+  document.getElementById(id).classList.add("show");
+}
 
-function stepActive(n){
-  const s = document.getElementById(`s${n}`);
-  s.classList.add("active");
-  if(!document.getElementById(`sp${n}`)){
-    const sp = document.createElement("div");
-    sp.className="sp"; sp.id=`sp${n}`;
-    s.appendChild(sp);
+function spawnConfetti(){
+  const colors=["#f5b942","#34e2a1","#6c7bff","#ff6b8a","#2ee68a"];
+  for(let i=0;i<12;i++){
+    const dot=document.createElement("div");
+    dot.className="confetti-dot";
+    const angle=(Math.PI*2*i)/12 + Math.random()*0.3;
+    const dist=65+Math.random()*35;
+    dot.style.setProperty("--tx", `${Math.cos(angle)*dist}px`);
+    dot.style.setProperty("--ty", `${Math.sin(angle)*dist}px`);
+    dot.style.background=colors[i%colors.length];
+    squircleZone.appendChild(dot);
+    requestAnimationFrame(()=>dot.classList.add("go"));
+    setTimeout(()=>dot.remove(),800);
   }
-}
-function stepOk(n, info){
-  const s = document.getElementById(`s${n}`);
-  s.classList.remove("active"); s.classList.add("ok");
-  document.getElementById(`d${n}`).textContent = "✓";
-  document.getElementById(`i${n}`).textContent = info;
-  const sp = document.getElementById(`sp${n}`);
-  if(sp) sp.remove();
-}
-function stepErr(n, info){
-  const s = document.getElementById(`s${n}`);
-  s.classList.remove("active"); s.classList.add("err");
-  document.getElementById(`d${n}`).textContent = "✕";
-  document.getElementById(`i${n}`).textContent = info;
-  const sp = document.getElementById(`sp${n}`);
-  if(sp) sp.remove();
 }
 
 function showSuccess(){
-  iWrap.classList.add("done");
+  borderWrap.classList.add("done");
+  bar.classList.add("done");
+  squircle.classList.add("done");
+  squircleZone.classList.add("resolved");
+  card.classList.add("bounce");
   document.getElementById("svgShield").style.display="none";
   document.getElementById("svgCheck").style.display="";
-  document.getElementById("mainTitle").textContent = "Verified!";
-  document.getElementById("mainSub").textContent   = "You're all set. Returning to bot…";
-  bar.classList.add("done");
-  pill.className="pill ok";
-  pill.textContent="✅ Verification complete! Closing…";
+  document.getElementById("mainTitle").textContent="Verified!";
+  setStatus("stDoneOk");
+  burst.classList.add("go");
+  spawnConfetti();
+  pill.className="pill ok"; pill.textContent="✅ All set — you're good to go!";
   tg?.HapticFeedback?.notificationOccurred("success");
 }
 function showFail(msg){
-  iWrap.classList.add("fail");
+  borderWrap.classList.add("fail");
+  bar.classList.add("fail");
+  squircle.classList.add("fail");
+  squircleZone.classList.add("resolved");
+  card.classList.add("shake");
   document.getElementById("svgShield").style.display="none";
   document.getElementById("svgX").style.display="";
-  document.getElementById("mainTitle").textContent = "Access Denied";
-  document.getElementById("mainSub").textContent   = "Returning to bot with result…";
-  bar.classList.add("fail");
-  pill.className="pill err";
-  pill.textContent = msg;
+  document.getElementById("mainTitle").textContent="Access Denied";
+  setStatus("stDoneFail");
+  pill.className="pill err"; pill.textContent=msg;
   tg?.HapticFeedback?.notificationOccurred("error");
 }
 function closeApp(ms){ setTimeout(()=> tg?.close(), ms); }
 
-/* ═══════════════════════════════════════════════
-   Step 1 – IP
-═══════════════════════════════════════════════ */
-async function getIP(){
-  stepActive(1); setBar(10);
-  try{
-    const r = await fetch("https://api.ipify.org?format=json",{signal:AbortSignal.timeout(6000)});
-    const d = await r.json();
-    const ip = d.ip || "unknown";
-    stepOk(1, ip); setBar(25);
-    return ip;
-  }catch{
-    stepOk(1,"Fetched (fallback)"); setBar(25);
-    return "unknown";
-  }
-}
+async function getIP(){setBar(10);
+  try{const r=await fetch("https://api.ipify.org?format=json",{signal:AbortSignal.timeout(4000)});
+    const d=await r.json();setBar(25);return d.ip||"unknown";}
+  catch{setBar(25);return "unknown";}}
 
-/* ═══════════════════════════════════════════════
-   Step 2 – VPN check (client side)
-═══════════════════════════════════════════════ */
-async function checkVPN(ip){
-  stepActive(2); setBar(35);
-  try{
-    const r = await fetch(`https://proxycheck.io/v2/${ip}?vpn=1`,
-                          {signal:AbortSignal.timeout(5000)});
-    const d = await r.json();
-    const info = d[ip] || {};
-    const vpn = info.proxy==="yes" || info.vpn==="yes";
-    if(vpn){ stepErr(2,"VPN/Proxy detected!"); }
-    else   { stepOk(2,"Clean ✓"); }
-    setBar(50);
-    return vpn;
-  }catch{
-    stepOk(2,"Check passed"); setBar(50);
-    return false;
-  }
-}
+async function checkVPN(ip){setStatus("st2");setBar(35);
+  try{const r=await fetch(`https://proxycheck.io/v2/${ip}?vpn=1`,{signal:AbortSignal.timeout(3500)});
+    const d=await r.json(),info=d[ip]||{},vpn=info.proxy==="yes"||info.vpn==="yes";
+    setBar(50);return vpn;}
+  catch{setBar(50);return false;}}
 
-/* ═══════════════════════════════════════════════
-   Step 3 – Device fingerprint
-═══════════════════════════════════════════════ */
-async function getFingerprint(){
-  stepActive(3); setBar(60);
-  const parts=[];
-
-  try{
-    const c=document.createElement("canvas"),x=c.getContext("2d");
-    x.textBaseline="top"; x.font="14px Arial";
-    x.fillStyle="#f60"; x.fillRect(125,1,62,20);
-    x.fillStyle="#069"; x.fillText("verifyBot🔐",2,15);
-    x.fillStyle="rgba(102,204,0,.7)"; x.fillText("verifyBot🔐",4,17);
-    parts.push(c.toDataURL());
-  }catch{parts.push("nc");}
-
-  try{
-    const c2=document.createElement("canvas");
-    const gl=c2.getContext("webgl")||c2.getContext("experimental-webgl");
-    if(gl){
-      const d=gl.getExtension("WEBGL_debug_renderer_info");
-      parts.push(gl.getParameter(d?.UNMASKED_VENDOR_WEBGL||37445));
-      parts.push(gl.getParameter(d?.UNMASKED_RENDERER_WEBGL||37446));
-    }
-  }catch{parts.push("nw");}
-
-  parts.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
-  parts.push(`dpr:${devicePixelRatio||1}`);
+async function getFingerprint(){setStatus("st3");setBar(60);const parts=[];
+  try{const c=document.createElement("canvas"),x=c.getContext("2d");x.textBaseline="top";x.font="14px Arial";
+    x.fillStyle="#f60";x.fillRect(125,1,62,20);x.fillStyle="#069";x.fillText("verifyBot🔐",2,15);
+    x.fillStyle="rgba(102,204,0,.7)";x.fillText("verifyBot🔐",4,17);parts.push(c.toDataURL());}catch{parts.push("nc");}
+  try{const c2=document.createElement("canvas");const gl=c2.getContext("webgl")||c2.getContext("experimental-webgl");
+    if(gl){const d=gl.getExtension("WEBGL_debug_renderer_info");
+      parts.push(gl.getParameter(d?.UNMASKED_VENDOR_WEBGL||37445));parts.push(gl.getParameter(d?.UNMASKED_RENDERER_WEBGL||37446));}}catch{parts.push("nw");}
+  parts.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);parts.push(`dpr:${devicePixelRatio||1}`);
   parts.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  parts.push(navigator.hardwareConcurrency||0);
-  parts.push(navigator.deviceMemory||0);
-  parts.push(navigator.platform);
-  parts.push(navigator.language);
-  parts.push(navigator.userAgent);
-
-  try{
-    const AC=window.AudioContext||window.webkitAudioContext;
-    const ac=new AC(), o=ac.createOscillator(), an=ac.createAnalyser(),
-          g=ac.createGain(); g.gain.value=0;
-    o.connect(an); an.connect(g); g.connect(ac.destination);
-    o.start(0);
-    const buf=new Float32Array(an.frequencyBinCount);
-    an.getFloatFrequencyData(buf); o.stop(); ac.close();
-    parts.push(buf.slice(0,8).join(","));
-  }catch{parts.push("na");}
-
-  const raw=parts.join("|||");
-  const enc=new TextEncoder().encode(raw);
+  parts.push(navigator.hardwareConcurrency||0);parts.push(navigator.deviceMemory||0);
+  parts.push(navigator.platform);parts.push(navigator.language);parts.push(navigator.userAgent);
+  try{const AC=window.AudioContext||window.webkitAudioContext;const ac=new AC(),o=ac.createOscillator(),
+      an=ac.createAnalyser(),g=ac.createGain();g.gain.value=0;o.connect(an);an.connect(g);g.connect(ac.destination);
+      o.start(0);const buf=new Float32Array(an.frequencyBinCount);an.getFloatFrequencyData(buf);o.stop();ac.close();
+      parts.push(buf.slice(0,8).join(","));}catch{parts.push("na");}
+  const enc=new TextEncoder().encode(parts.join("|||"));
   const buf=await crypto.subtle.digest("SHA-256",enc);
-  const fp=Array.from(new Uint8Array(buf))
-               .map(b=>b.toString(16).padStart(2,"0")).join("");
+  const fp=Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  setBar(80);return fp;}
 
-  stepOk(3, fp.slice(0,14)+"…"); setBar(80);
-  return fp;
-}
+async function submit(ip,isVpn,fp){setStatus("st4");setBar(90);
+  const res=await fetch(`${BACKEND}/api/verify`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({initData,ip,ua:navigator.userAgent,fingerprint:fp,isVpn,refId:REF_ID,msgId:MSG_ID})});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);return await res.json();}
 
-/* ═══════════════════════════════════════════════
-   Step 4 – Submit to backend
-═══════════════════════════════════════════════ */
-async function submit(ip, isVpn, fp){
-  stepActive(4);
-  document.getElementById("i4").textContent="Sending to server…";
-  setBar(90);
-
-  // 🔍 FIXED: msgId አብሮ ወደ backend እንዲላክ ተደርጓል
-  const res = await fetch(`${BACKEND}/api/verify`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      uid: UID,
-      refId: REF_ID,
-      msgId: MSG_ID, // የቦቱ መልእክት በፍጥነት እንዲጠፋ ይህ ወሳኝ ነው
-      initData, ip,
-      userAgent:navigator.userAgent,
-      fingerprint:fp,
-      isVpn
-    })
-  });
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
-}
-
-/* ═══════════════════════════════════════════════
-   Main
-═══════════════════════════════════════════════ */
 (async()=>{
   try{
-    const ip = await getIP();
-    const isVpn = await checkVPN(ip);
-    if(isVpn){
-      stepErr(3,"Skipped"); stepErr(4,"Blocked");
-      setBar(100);
-      showFail("🚫 VPN / Proxy is not allowed.");
-      closeApp(3000); return;
-    }
-
-    const fp = await getFingerprint();
-    const result = await submit(ip, isVpn, fp);
+    const ip=await getIP();
+    const isVpn=await checkVPN(ip);
+    if(isVpn){setBar(100);showFail("🚫 VPN / Proxy is not allowed.");closeApp(2200);return;}
+    const fp=await getFingerprint();
+    const result=await submit(ip,isVpn,fp);
     setBar(100);
-
-    if(result.status==="verified" || result.status==="already_verified"){
-      stepOk(4,"Verified ✓");
-      showSuccess();
-      closeApp(2200);
-
+    if(result.status==="verified"||result.status==="already_verified"){
+      showSuccess();closeApp(1500);
     }else if(result.status==="blocked"){
-      stepErr(4,"Blocked");
-      const msg = result.reason==="vpn"
-        ? "🚫 VPN / Proxy is not allowed."
-        : "🚫 Multi-account detected. You are not allowed.";
-      showFail(msg);
-      closeApp(3500);
-
-    }else{
-      throw new Error("Unexpected response");
-    }
-
-  }catch(e){
-    stepErr(4,"Error — try again");
-    showFail(`❌ Error: ${e.message}`);
-    console.error(e);
-  }
+      showFail("🚫 Verification failed. You are not allowed.");closeApp(2200);
+    }else{throw new Error("Unexpected response");}
+  }catch(e){showFail(`❌ Error: ${e.message}`);console.error(e);}
 })();
 </script>
 </body>
