@@ -174,12 +174,14 @@ body::before{
 /* ── Result pill ──────────────────────────────── */
 .pill{
   display:none;
-  padding:12px 15px;
+  padding:13px 15px;
   border-radius:12px;
-  font-size:.8rem;font-weight:600;
-  line-height:1.45;
+  font-size:.8rem;font-weight:500;
+  line-height:1.6;
   letter-spacing:-.01em;
+  text-align:left;
 }
+.pill strong{font-weight:700;}
 .pill.ok{
   display:block;
   background:rgba(34,197,94,.08);
@@ -337,15 +339,32 @@ function showSuccess(){
   pill.textContent = "✅ Verification complete. Closing…";
   tg?.HapticFeedback?.notificationOccurred("success");
 }
-function showFail(msg){
+function showFail(reason){
   iconZone.classList.add("fail");
   document.getElementById("svgShield").style.display = "none";
   document.getElementById("svgX").style.display      = "";
-  document.getElementById("mainTitle").textContent   = "Access Denied";
-  document.getElementById("mainSub").textContent     = "Returning to bot with result…";
   bar.classList.add("fail"); setBar(100);
-  pill.className   = "pill err";
-  pill.textContent = msg;
+  pill.className = "pill err";
+
+  if(reason === "vpn"){
+    document.getElementById("mainTitle").textContent = "VPN Detected";
+    document.getElementById("mainSub").textContent   = "You must disable your VPN or proxy to continue.";
+    pill.innerHTML =
+      "🔒 <strong>Turn off your VPN / Proxy</strong>, then press the verify button again in the bot.";
+
+  } else if(reason === "multi"){
+    document.getElementById("mainTitle").textContent = "Duplicate Account";
+    document.getElementById("mainSub").textContent   = "This device is already linked to another account.";
+    pill.innerHTML =
+      "👤 You are using a <strong>secondary account</strong>.<br>" +
+      "Please return to your <strong>first (main) account</strong> and invite real friends from there.";
+
+  } else {
+    document.getElementById("mainTitle").textContent = "Access Denied";
+    document.getElementById("mainSub").textContent   = "Something went wrong. Please try again.";
+    pill.innerHTML = "❌ " + reason;
+  }
+
   tg?.HapticFeedback?.notificationOccurred("error");
 }
 function closeApp(ms){ setTimeout(() => tg?.close(), ms); }
@@ -518,8 +537,8 @@ async function submit(ip, isVpn, fp){
     if(isVpn){
       stepErr(3, "Skipped");
       stepErr(4, "Blocked — VPN detected");
-      showFail("🚫 VPN / Proxy not allowed. Disable it and try again.");
-      closeApp(3500);
+      showFail("vpn");
+      closeApp(4500);
       return;
     }
 
@@ -533,12 +552,10 @@ async function submit(ip, isVpn, fp){
       closeApp(2200);
 
     } else if(result.status === "blocked"){
-      stepErr(4, "Blocked");
-      const msg = result.reason === "vpn"
-        ? "🚫 VPN / Proxy not allowed."
-        : "🚫 Multi-account detected. Access denied.";
-      showFail(msg);
-      closeApp(3500);
+      const reason = result.reason === "vpn" ? "vpn" : "multi";
+      stepErr(4, reason === "vpn" ? "Blocked — VPN" : "Blocked — Multi-account");
+      showFail(reason);
+      closeApp(4500);
 
     } else {
       throw new Error(`Unexpected status: ${result.status}`);
@@ -546,7 +563,7 @@ async function submit(ip, isVpn, fp){
 
   }catch(e){
     stepErr(4, "Error — please retry");
-    showFail(`❌ ${e.message || "Connection failed. Try again."}`);
+    showFail(e.message || "Connection failed. Try again.");
     console.error("[verify]", e);
   }
 })();
