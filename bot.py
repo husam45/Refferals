@@ -181,22 +181,19 @@ class DataEngine:
             )
             return (await cur.fetchone()) is not None
 
-    # ── FIXED: IP removed — only fingerprint checked to avoid false positives ──
     @staticmethod
-    async def find_duplicate(fingerprint: str, exclude_user: int):
-        """
-        Returns UID that already owns this fingerprint, or None.
-        IP is NOT checked — shared networks (WiFi, mobile data) would cause
-        false positives and block innocent users.
-        """
-        if not fingerprint or fingerprint in ("undefined", "unknown", ""):
-            return None
+    async def find_duplicate(ip: str, fingerprint: str, exclude_user: int):
+        # ⚠️ ሴኪውሪቲ ማሻሻያ፡ ባዶ ወይም ፌክ መረጃዎች በቀላሉ እንዳያልፉ መከላከል
+        if not fingerprint or fingerprint in ("undefined", "null", ""):
+            return True  # ፊንገርፕሪንት ከሌለ በቀጥታ እንደ ማጭበርበር ይቆጠራል
+        
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
+            # IP ወይም Fingerprint ከተደገመ እና የተለየ አካውንት ከሆነ ማግኘት
             cur = await db.execute(
                 "SELECT user_id FROM verifications "
-                "WHERE fingerprint = ? AND user_id != ? LIMIT 1",
-                (fingerprint, exclude_user),
+                "WHERE (ip_address = ? OR fingerprint = ?) AND user_id != ? LIMIT 1",
+                (ip, fingerprint, exclude_user),
             )
             row = await cur.fetchone()
             return row["user_id"] if row else None
@@ -320,8 +317,8 @@ class AdminConsoleWorkflow(StatesGroup):
 # ─────────────────────────────────────────────────────────────────────────────
 # BOT + DISPATCHER
 # ─────────────────────────────────────────────────────────────────────────────
-bot         = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp          = Dispatcher(storage=MemoryStorage())
+bot        = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp         = Dispatcher(storage=MemoryStorage())
 core_router = Router()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -348,7 +345,7 @@ async def inspect_compulsory_memberships(user_id: int) -> list:
     unjoined = []
     for ch in channels:
         if ch["bot_added"]:
-            unjoined.append(dict(ch))
+            pass
         else:
             try:
                 m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
@@ -358,7 +355,7 @@ async def inspect_compulsory_memberships(user_id: int) -> list:
                 continue
             except Exception:
                 pass
-            unjoined.append(dict(ch))
+        unjoined.append(dict(ch))
     return unjoined
 
 async def enforce_membership_gate(event, user_id: int) -> bool:
@@ -388,9 +385,7 @@ async def execute_network_vpn_lookup(client_ip: str) -> bool:
         url   = f"https://proxycheck.io/v2/{client_ip}?vpn=1{param}"
         async with httpx.AsyncClient(timeout=4) as c:
             r = await c.get(url)
-            d = r.json()
-            info = d.get(client_ip, {})
-            return info.get("proxy") == "yes" or info.get("vpn") == "yes"
+            return r.json().get(client_ip, {}).get("proxy") == "yes"
     except Exception:
         return False
 
@@ -400,8 +395,7 @@ async def execute_network_vpn_lookup(client_ip: str) -> bool:
 def generate_verification_widget(user_id: int, ref: int, msg_id: int = 0):
     url = f"{WEBAPP_URL}/verify?uid={user_id}&ref={ref}&msg_id={msg_id}"
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔐 Open Mini App & Verify",
-                             web_app=WebAppInfo(url=url))
+        InlineKeyboardButton(text="🔐 Open Mini App & Verify", web_app=WebAppInfo(url=url))
     ]])
 
 def generate_dashboard_matrix(user_id: int) -> InlineKeyboardMarkup:
@@ -411,7 +405,7 @@ def generate_dashboard_matrix(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="👥 Referrals / ጋባዦች", callback_data="ui_fetch_referrals"),
         ],
         [
-            InlineKeyboardButton(text="🔗 My Link / ሊንኬ",       callback_data="ui_fetch_link"),
+            InlineKeyboardButton(text="🔗 My Link / ሊንኬ",         callback_data="ui_fetch_link"),
             InlineKeyboardButton(text="💸 Withdraw / ብር ማውጫ", callback_data="ui_initiate_withdrawal"),
         ],
     ]
@@ -432,23 +426,23 @@ def generate_admin_dashboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Bot Statistics",     callback_data="adm_cmd_stats"),
         ],
         [
-            InlineKeyboardButton(text="🔴 Force Join (With Admin)",  callback_data="adm_cmd_add_mand"),
-            InlineKeyboardButton(text="🟡 Force Join (No Admin)",    callback_data="adm_cmd_add_noadmin"),
+            InlineKeyboardButton(text="🔴 Force Join (With Admin)",    callback_data="adm_cmd_add_mand"),
+            InlineKeyboardButton(text="🟡 Force Join (No Admin)",      callback_data="adm_cmd_add_noadmin"),
         ],
         [
-            InlineKeyboardButton(text="🗑 Remove Force Channel",     callback_data="adm_cmd_rm_node"),
-            InlineKeyboardButton(text="📋 List Force Channels",      callback_data="adm_cmd_list_channels"),
+            InlineKeyboardButton(text="🗑 Remove Force Channel",       callback_data="adm_cmd_rm_node"),
+            InlineKeyboardButton(text="📋 List Force Channels",        callback_data="adm_cmd_list_channels"),
         ],
         [
             InlineKeyboardButton(text="📥 Pending Withdrawals",  callback_data="adm_cmd_pending_tickets"),
             InlineKeyboardButton(text="📢 Broadcast Message",    callback_data="adm_cmd_broadcast"),
         ],
         [
-            InlineKeyboardButton(text="🔍 Search User", callback_data="adm_cmd_search"),
+            InlineKeyboardButton(text="🔍 Search User",   callback_data="adm_cmd_search"),
         ],
         [
-            InlineKeyboardButton(text="🚫 Ban User",   callback_data="adm_cmd_ban"),
-            InlineKeyboardButton(text="✅ Unban User", callback_data="adm_cmd_unban"),
+            InlineKeyboardButton(text="🚫 Ban User",    callback_data="adm_cmd_ban"),
+            InlineKeyboardButton(text="✅ Unban User",  callback_data="adm_cmd_unban"),
         ],
         [InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="ui_return_home")],
     ])
@@ -504,7 +498,7 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
         await callback.message.delete()
     except Exception:
         pass
-    s   = await state.get_data()
+    s = await state.get_data()
     ref = s.get("stashed_referrer_id", 0)
     await state.clear()
 
@@ -596,8 +590,7 @@ async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
         ])
     )
 
-@core_router.callback_query(F.data == "gateway_telebirr",
-                             UserWithdrawalWorkflow.select_payout_gateway)
+@core_router.callback_query(F.data == "gateway_telebirr", UserWithdrawalWorkflow.select_payout_gateway)
 async def process_telebirr_selection(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserWithdrawalWorkflow.input_cash_volume)
     await callback.message.edit_text(
@@ -647,8 +640,7 @@ async def process_account_title(message: Message, state: FSMContext):
     )
     await state.set_state(UserWithdrawalWorkflow.payout_final_approval)
 
-@core_router.callback_query(F.data == "action_payout_dispatch",
-                             UserWithdrawalWorkflow.payout_final_approval)
+@core_router.callback_query(F.data == "action_payout_dispatch", UserWithdrawalWorkflow.payout_final_approval)
 async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     s    = await state.get_data()
     uid  = callback.from_user.id
@@ -665,13 +657,12 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
-            # ── FIXED: show only user ID, no username ──────────────────────────
-            txt = (
+            alias = f"@{user['username']}" if user["username"] else "Private Profile"
+            txt   = (
                 f"⏳ <b>NEW WITHDRAWAL REQUEST</b>\n\n"
-                f"👤 {s['validated_title']}\n"
-                f"🆔 <code>{uid}</code>\n"
+                f"👤 {s['validated_title']} ({alias})\n"
                 f"💰 <code>ETB {s['validated_volume']:.2f}</code>\n"
-                f"📱 Telebirr — <code>{s['validated_phone']}</code>\n"
+                f"📱 Telebirr\n"
                 f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
             receipt = await bot.send_message(PAYMENT_LOG_CHANNEL, txt)
@@ -680,14 +671,13 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.error(f"Channel error: {e}")
 
-    # ── Admin DM notification — only ID, no username ───────────────────────────
+    alias_str = f"@{user['username']}" if user["username"] else "None"
     admin_txt = (
         f"📥 <b>Incoming Ticket #{tid}</b>\n\n"
         f"👤 {s['validated_title']}\n"
-        f"🆔 <code>{uid}</code>\n"
+        f"🆔 <code>{uid}</code>  🏷 {alias_str}\n"
         f"💰 <b>{s['validated_volume']:.2f} Birr</b>\n"
-        f"📱 <code>{s['validated_phone']}</code>\n"
-        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        f"📱 <code>{s['validated_phone']}</code>"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Approve",  callback_data=f"adm_payout_ap_{tid}"),
@@ -714,36 +704,27 @@ async def process_admin_approval(callback: CallbackQuery):
         return await callback.answer("Already processed.")
 
     await DataEngine.update_withdrawal_status(tid, "approved", ticket["channel_post_id"])
-
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try:
-            # ── FIXED: proof message shows only ID, no username ────────────────
             await bot.send_photo(
-                PAYMENT_LOG_CHANNEL,
-                TELEBIRR_PROOF_IMAGE,
+                PAYMENT_LOG_CHANNEL, TELEBIRR_PROOF_IMAGE,
                 caption=(
                     f"✅ <b>PAYOUT COMPLETED</b>\n\n"
                     f"👤 {ticket['full_name']}\n"
-                    f"🆔 <code>{ticket['user_id']}</code>\n"
-                    f"💰 <code>ETB {ticket['amount']:.2f}</code> ✅\n"
-                    f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    f"💰 <code>ETB {ticket['amount']:.2f}</code> ✅"
                 ),
                 reply_to_message_id=ticket["channel_post_id"]
             )
         except Exception as e:
             logger.error(f"Photo confirm error: {e}")
-
     try:
         await bot.send_message(
             ticket["user_id"],
-            f"🎉 <b>Payment Sent!</b>\n\n"
-            f"Your cashout of <code>{ticket['amount']:.2f} Birr</code> has been processed.\n"
-            f"Check your Telebirr account."
+            f"🎉 Your cashout of {ticket['amount']:.2f} Birr has been processed!"
         )
     except Exception:
         pass
-
-    await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Approved & Paid.</b>")
+    await callback.message.edit_text(callback.message.text + "\n\n✅ Approved.")
 
 @core_router.callback_query(F.data.startswith("adm_payout_rj_"))
 async def process_admin_rejection(callback: CallbackQuery):
@@ -757,13 +738,11 @@ async def process_admin_rejection(callback: CallbackQuery):
     await DataEngine.add_balance(ticket["user_id"], ticket["amount"])
     try:
         await bot.send_message(
-            ticket["user_id"],
-            f"❌ <b>Withdrawal Rejected</b>\n\n"
-            f"Your <code>{ticket['amount']:.2f} Birr</code> has been returned to your balance."
+            ticket["user_id"], "❌ Withdrawal rejected. Assets returned to your balance."
         )
     except Exception:
         pass
-    await callback.message.edit_text(callback.message.text + "\n\n❌ <b>Rejected. Balance restored.</b>")
+    await callback.message.edit_text(callback.message.text + "\n\n❌ Rejected.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ADMIN PANEL
@@ -804,8 +783,7 @@ async def process_add_channel_title(message: Message, state: FSMContext):
 async def process_add_channel_finalize(message: Message, state: FSMContext):
     s = await state.get_data()
     await state.clear()
-    await DataEngine.add_force_channel(s["ch_id"], s["ch_title"],
-                                       message.text.strip(), bot_added=0)
+    await DataEngine.add_force_channel(s["ch_id"], s["ch_title"], message.text.strip(), bot_added=0)
     await message.answer(
         f"✅ <b>Force channel added (With Admin)</b>\n📌 {s['ch_title']}",
         reply_markup=generate_admin_dashboard()
@@ -818,13 +796,16 @@ async def process_add_noadmin_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "🟡 <b>Force Join — Without Admin Rights</b>\n\n"
         "Bot does NOT need to be admin.\n"
+        "User will see a join button. After clicking, they press verify.\n\n"
+        "⚠️ <i>Note: Membership cannot be verified automatically — users self-report via the Verify button.</i>\n\n"
         "Enter the channel/group <b>invite link</b> (t.me/... or t.me/+...):",
         reply_markup=generate_fallback_navigation("ui_admin_core")
     )
 
 @core_router.message(AdminConsoleWorkflow.append_noadmin_link)
 async def process_noadmin_link(message: Message, state: FSMContext):
-    await state.update_data(na_link=message.text.strip())
+    link = message.text.strip()
+    await state.update_data(na_link=link)
     await state.set_state(AdminConsoleWorkflow.append_noadmin_title)
     await message.answer("📝 <b>Enter Channel/Group Display Name:</b>")
 
@@ -840,9 +821,7 @@ async def process_noadmin_title(message: Message, state: FSMContext):
         bot_added=1
     )
     await message.answer(
-        f"✅ <b>Force channel added (No Admin)</b>\n"
-        f"📌 {message.text.strip()}\n"
-        f"🔗 {s['na_link']}",
+        f"✅ <b>Force channel added (No Admin)</b>\n📌 {message.text.strip()}\n🔗 {s['na_link']}\n\n⚠️ Users self-verify after joining.",
         reply_markup=generate_admin_dashboard()
     )
 
@@ -925,16 +904,10 @@ async def process_stats(callback: CallbackQuery):
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT COUNT(*), SUM(balance) FROM users")
         row = await cur.fetchone()
-        cur2 = await db.execute("SELECT COUNT(*) FROM verifications")
-        vrow = await cur2.fetchone()
-        cur3 = await db.execute("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
-        wrow = await cur3.fetchone()
+    pop = row[0] or 0
+    cap = row[1] or 0.0
     await callback.message.edit_text(
-        f"📊 <b>Bot Statistics:</b>\n\n"
-        f"• Total Users: <b>{row[0] or 0}</b>\n"
-        f"• Verified Users: <b>{vrow[0] or 0}</b>\n"
-        f"• Total Balance: <b>{row[1] or 0:.2f} ETB</b>\n"
-        f"• Pending Withdrawals: <b>{wrow[0] or 0}</b>",
+        f"📊 <b>Analytics:</b>\n\n• Total Users: <b>{pop}</b>\n• Total Balance: <b>{cap:.2f} ETB</b>",
         reply_markup=generate_fallback_navigation("ui_admin_core")
     )
 
@@ -953,7 +926,7 @@ async def process_broadcast_execute(message: Message, state: FSMContext):
     await state.clear()
     progress = await message.answer("⏳ Sending...")
     async with aiosqlite.connect(DB_PATH) as db:
-        cur   = await db.execute("SELECT user_id FROM users")
+        cur = await db.execute("SELECT user_id FROM users")
         nodes = await cur.fetchall()
     sc = 0
     for (uid,) in nodes:
@@ -965,8 +938,7 @@ async def process_broadcast_execute(message: Message, state: FSMContext):
             pass
     await progress.delete()
     await message.answer(
-        f"✅ Sent to {sc}/{len(nodes)} users.",
-        reply_markup=generate_admin_dashboard()
+        f"✅ Sent to {sc} users.", reply_markup=generate_admin_dashboard()
     )
 
 @core_router.callback_query(F.data == "adm_cmd_search")
@@ -981,22 +953,16 @@ async def process_search_start(callback: CallbackQuery, state: FSMContext):
 @core_router.message(AdminConsoleWorkflow.lookup_individual_id)
 async def process_search_execute(message: Message, state: FSMContext):
     await state.clear()
-    try:
-        target = int(message.text.strip())
-    except ValueError:
-        return await message.answer("❌ Invalid ID.", reply_markup=generate_admin_dashboard())
-    user = await DataEngine.get_user(target)
+    user = await DataEngine.get_user(int(message.text.strip()))
     if not user:
         return await message.answer("❌ User not found.", reply_markup=generate_admin_dashboard())
     cnt = await DataEngine.get_referral_count(user["user_id"])
-    verified = await DataEngine.is_verified(user["user_id"])
     await message.answer(
         f"👤 <b>User Profile:</b>\n\n"
         f"• Name: {user['full_name']}\n"
-        f"• ID: <code>{user['user_id']}</code>\n"
+        f"• Username: @{user['username'] or 'N/A'}\n"
         f"• Balance: <b>{user['balance']:.2f} Birr</b>\n"
         f"• Referrals: <b>{cnt}</b>\n"
-        f"• Verified: <b>{'Yes' if verified else 'No'}</b>\n"
         f"• Banned: <b>{'Yes' if user['is_banned'] else 'No'}</b>\n"
         f"• Joined: {user['joined_at']}",
         reply_markup=generate_admin_dashboard()
@@ -1013,12 +979,9 @@ async def process_ban_start(callback: CallbackQuery, state: FSMContext):
 
 @core_router.message(AdminConsoleWorkflow.banish_individual_id)
 async def process_ban_execute(message: Message, state: FSMContext):
+    await DataEngine.ban_user(int(message.text.strip()), 1)
     await state.clear()
-    try:
-        await DataEngine.ban_user(int(message.text.strip()), 1)
-        await message.answer("✅ User banned.", reply_markup=generate_admin_dashboard())
-    except Exception:
-        await message.answer("❌ Invalid ID.", reply_markup=generate_admin_dashboard())
+    await message.answer("✅ User banned.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_unban")
 async def process_unban_start(callback: CallbackQuery, state: FSMContext):
@@ -1031,12 +994,9 @@ async def process_unban_start(callback: CallbackQuery, state: FSMContext):
 
 @core_router.message(AdminConsoleWorkflow.pardon_individual_id)
 async def process_unban_execute(message: Message, state: FSMContext):
+    await DataEngine.ban_user(int(message.text.strip()), 0)
     await state.clear()
-    try:
-        await DataEngine.ban_user(int(message.text.strip()), 0)
-        await message.answer("✅ User unbanned.", reply_markup=generate_admin_dashboard())
-    except Exception:
-        await message.answer("❌ Invalid ID.", reply_markup=generate_admin_dashboard())
+    await message.answer("✅ User unbanned.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_reward")
 async def process_reward_start(callback: CallbackQuery, state: FSMContext):
@@ -1049,8 +1009,8 @@ async def process_reward_start(callback: CallbackQuery, state: FSMContext):
 
 @core_router.message(AdminConsoleWorkflow.modify_referral_bounty)
 async def process_reward_execute(message: Message, state: FSMContext):
-    await state.clear()
     await DataEngine.set_setting("reward_per_referral", message.text.strip())
+    await state.clear()
     await message.answer("✅ Reward updated.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_min_wd")
@@ -1064,8 +1024,8 @@ async def process_min_wd_start(callback: CallbackQuery, state: FSMContext):
 
 @core_router.message(AdminConsoleWorkflow.modify_minimum_cashout)
 async def process_min_wd_execute(message: Message, state: FSMContext):
-    await state.clear()
     await DataEngine.set_setting("min_withdrawal", message.text.strip())
+    await state.clear()
     await message.answer("✅ Minimum withdrawal updated.", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_pending_tickets")
@@ -1074,15 +1034,13 @@ async def process_pending_inventory(callback: CallbackQuery):
     pending = await DataEngine.get_pending_withdrawals()
     if not pending:
         return await callback.message.edit_text(
-            "📭 No pending withdrawals.",
-            reply_markup=generate_fallback_navigation("ui_admin_core")
+            "📭 No pending withdrawals.", reply_markup=generate_fallback_navigation("ui_admin_core")
         )
     lines = []
     for t in pending:
         lines.append(
             f"• <b>#{t['id']}</b> — {t['full_name']} — "
-            f"🆔 <code>{t['user_id']}</code> — "
-            f"<code>{t['amount']:.2f} ETB</code>"
+            f"<code>{t['amount']:.2f} ETB</code> — {t['phone']}"
         )
     await callback.message.edit_text(
         f"📥 <b>Pending Withdrawals ({len(pending)})</b>\n\n" + "\n".join(lines),
@@ -1118,111 +1076,71 @@ async def serve_frontend(uid: int = 0, ref: int = 0, msg_id: int = 0):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Frontend missing: {e}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# /api/verify — FULLY FIXED
-# ─────────────────────────────────────────────────────────────────────────────
 @api_platform.post("/api/verify")
 async def execute_verification(request: Request):
-    data = await request.json()
-
-    # ── 1. Validate Telegram initData — cryptographic proof of identity ───────
+    data    = await request.json()
     tg_user = parse_telegram_webapp_handshake(data.get("initData", ""))
     if not tg_user:
-        raise HTTPException(status_code=403, detail="Invalid Telegram session.")
+        raise HTTPException(status_code=403, detail="Signature breach.")
 
-    # Always use UID from initData — URL param can be faked
     uid    = int(tg_user["id"])
     ref_id = int(data.get("refId") or 0)
     msg_id = int(data.get("msgId") or 0)
-    fp     = data.get("fingerprint", "").strip()
-    ip     = data.get("ip", "unknown").strip()
-    ua     = data.get("userAgent", "")
 
-    logger.info("Verify uid=%s ip=%s fp=%s...", uid, ip, fp[:12] if fp else "none")
-
-    # ── 2. Already verified ───────────────────────────────────────────────────
     if await DataEngine.is_verified(uid):
-        logger.info("UID %s already verified", uid)
         return JSONResponse({"status": "already_verified"})
 
-    # ── 3. Banned user ────────────────────────────────────────────────────────
-    user_row = await DataEngine.get_user(uid)
-    if user_row and user_row["is_banned"]:
-        logger.warning("Banned uid=%s tried to verify", uid)
-        return JSONResponse({"status": "blocked", "reason": "banned"})
-
-    # ── 4. Multi-account — fingerprint only, never IP ─────────────────────────
-    duplicate_uid = await DataEngine.find_duplicate(fp, uid)
-    if duplicate_uid:
-        logger.warning(
-            "Multi-account: fp=%s... owned by uid=%s, attempted by uid=%s",
-            fp[:12], duplicate_uid, uid
-        )
-        await DataEngine.create_user(
-            uid, tg_user.get("username", ""), tg_user.get("first_name", "")
-        )
+    # 🛡️ ሴኪውሪቲ ማሻሻያ 1: ፊንገርፕሪንት ባዶ ወይም 'undefined' ከሆነ በቀጥታ ማገድ
+    fingerprint = data.get("fingerprint", "").strip()
+    if not fingerprint or fingerprint in ("undefined", "null", ""):
+        # ለደህንነት ሲባል አካውንቱን ወዲያው ማገድ
+        await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
         await DataEngine.ban_user(uid, 1)
-        try:
-            await bot.send_message(
-                uid,
-                "🚫 <b>Access Denied — Duplicate Account</b>\n\n"
-                "This device is already linked to another Telegram account.\n\n"
-                "👤 Please open your <b>first (main) account</b> and use the invite "
-                "link from there.\n\nOnly real referrals are accepted."
-            )
-        except Exception:
-            pass
-        return JSONResponse({"status": "blocked", "reason": "multi"})
+        return JSONResponse({"status": "blocked"})
 
-    # ── 5. VPN check — backend only, never trust frontend flag ────────────────
-    is_vpn = await execute_network_vpn_lookup(ip)
-    if is_vpn:
-        logger.warning("VPN detected uid=%s ip=%s", uid, ip)
-        await DataEngine.create_user(
-            uid, tg_user.get("username", ""), tg_user.get("first_name", "")
-        )
-        try:
-            await bot.send_message(
-                uid,
-                "🔒 <b>VPN / Proxy Detected</b>\n\n"
-                "Please <b>disable your VPN</b> and tap the verify button again."
-            )
-        except Exception:
-            pass
-        return JSONResponse({"status": "blocked", "reason": "vpn"})
+    # 🛡️ ሴኪውሪቲ ማሻሻያ 2: IP አድራሻን ከ Client ሳይሆን ከኔትወርክ ኮኔክሽን መውሰድ (Fake IP መከላከል)
+    client_ip = request.headers.get("X-Forwarded-For")
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
 
-    # ── 6. All passed — save and verify ───────────────────────────────────────
+    # የተወሰደውን ትክክለኛ IP በመጠቀም ዱፕሊኬት መኖሩን መፈተሽ
+    is_clone = await DataEngine.find_duplicate(client_ip, fingerprint, uid)
+    is_vpn   = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
+
+    if is_clone or is_vpn:
+        await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
+        await DataEngine.ban_user(uid, 1)
+        return JSONResponse({"status": "blocked"})
+
     if msg_id > 0:
         try:
             await bot.delete_message(chat_id=uid, message_id=msg_id)
         except Exception as e:
-            logger.warning("Could not delete msg %s: %s", msg_id, e)
+            logger.error(f"Delete msg error: {e}")
 
     await DataEngine.create_user(
         uid, tg_user.get("username", ""), tg_user.get("first_name", ""),
         ref_id or None
     )
-    await DataEngine.save_verification(uid, ip, ua, fp)
+    # ትክክለኛውን የተገኘውን client_ip ማስቀመጥ
+    await DataEngine.save_verification(uid, client_ip, data.get("ua", ""), fingerprint)
 
-    logger.info("✅ UID %s verified successfully", uid)
-
-    # Credit referral reward
     if ref_id and ref_id != uid:
         bounty = float(await DataEngine.get_setting("reward_per_referral", "10"))
         await DataEngine.add_balance(ref_id, bounty)
         try:
             await bot.send_message(
                 ref_id,
-                f"🎉 <b>New referral verified!</b>\n"
-                f"<code>+{bounty:.2f} Birr</code> has been added to your balance."
+                f"🎉 <b>Referral verified!</b> <code>+{bounty} Birr</code> credited."
             )
         except Exception:
             pass
 
     try:
         await bot.send_message(
-            uid,
-            "✅ <b>Verification Complete!</b>\n\nWelcome! You can now use the bot.",
+            uid, "✅ <b>Verification Confirmed!</b>",
             reply_markup=generate_dashboard_matrix(uid)
         )
     except Exception:
