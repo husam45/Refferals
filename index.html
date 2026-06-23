@@ -3,279 +3,177 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Security Verify</title>
+<title>Security Check</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
-/* ── Reset & Base ─────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{
-  min-height:100%;height:100%;
-  background:#080c14;
+  height:100%;background:#090d18;
   font-family:'Inter',system-ui,sans-serif;
-  color:#e2e8f5;
+  color:#dde4f0;
   display:flex;align-items:center;justify-content:center;
-  overflow:hidden;
   -webkit-font-smoothing:antialiased;
 }
-
-/* ── Ambient background ───────────────────────── */
 body::before{
-  content:'';
-  position:fixed;inset:0;
-  background:
-    radial-gradient(ellipse 60% 40% at 50% 0%, rgba(56,120,255,.13) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 30% at 80% 80%, rgba(99,60,200,.08) 0%, transparent 60%);
-  pointer-events:none;z-index:0;
+  content:'';position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(56,120,255,.12) 0%,transparent 70%);
 }
 
-/* ── Card ─────────────────────────────────────── */
+/* Card */
 .card{
   position:relative;z-index:1;
-  width:calc(100% - 28px);max-width:360px;
-  background:linear-gradient(160deg,#111827 0%,#0d1321 100%);
+  width:calc(100% - 32px);max-width:350px;
+  background:#0f1622;
   border:1px solid rgba(255,255,255,.07);
-  border-radius:24px;
-  padding:36px 22px 28px;
+  border-radius:22px;
+  padding:32px 20px 26px;
   text-align:center;
-  box-shadow:0 0 0 1px rgba(56,120,255,.08),
-             0 24px 60px rgba(0,0,0,.55),
-             inset 0 1px 0 rgba(255,255,255,.05);
+  box-shadow:0 20px 60px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05);
 }
 
-/* ── Icon ─────────────────────────────────────── */
+/* Icon */
 .icon-zone{
-  width:76px;height:76px;margin:0 auto 22px;
+  width:72px;height:72px;margin:0 auto 20px;
   position:relative;display:flex;align-items:center;justify-content:center;
 }
 .icon-bg{
   position:absolute;inset:0;border-radius:50%;
   background:rgba(56,120,255,.1);
-  border:1.5px solid rgba(56,120,255,.25);
-  transition:background .5s,border-color .5s;
+  border:1.5px solid rgba(56,120,255,.22);
+  transition:background .4s,border-color .4s;
 }
-.icon-zone.done .icon-bg{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.35);}
-.icon-zone.fail .icon-bg{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.35);}
-.icon-zone svg{width:30px;height:30px;position:relative;z-index:1;}
+.icon-zone.state-ok .icon-bg{background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3);}
+.icon-zone.state-err .icon-bg{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3);}
+.icon-zone svg{width:28px;height:28px;position:relative;z-index:1;transition:opacity .2s;}
 
-/* ── Spinner ring ─────────────────────────────── */
-@keyframes spinRing{to{transform:rotate(360deg)}}
+@keyframes rot{to{transform:rotate(360deg)}}
 .spin-ring{
   position:absolute;inset:-7px;border-radius:50%;
   border:2px solid transparent;
   border-top-color:#3878ff;
-  border-right-color:rgba(56,120,255,.25);
-  animation:spinRing 1s linear infinite;
-  transition:opacity .3s;
+  border-right-color:rgba(56,120,255,.2);
+  animation:rot .9s linear infinite;
 }
-.icon-zone.done .spin-ring,
-.icon-zone.fail .spin-ring{opacity:0;pointer-events:none;}
+.icon-zone.state-ok .spin-ring,
+.icon-zone.state-err .spin-ring{display:none;}
 
-/* ── Heading ──────────────────────────────────── */
-.title{
-  font-size:1.15rem;font-weight:800;
-  letter-spacing:-.025em;
-  color:#f0f4ff;
-  margin-bottom:4px;
-}
-.sub{
-  font-size:.78rem;color:#4e617e;
-  line-height:1.5;margin-bottom:24px;
-}
+/* Text */
+.title{font-size:1.1rem;font-weight:800;letter-spacing:-.025em;color:#eef2ff;margin-bottom:4px;}
+.sub{font-size:.76rem;color:#4a5d7a;line-height:1.5;margin-bottom:22px;min-height:2.2em;}
 
-/* ── Progress bar ─────────────────────────────── */
-.bar-track{
-  height:3px;
-  background:rgba(255,255,255,.06);
-  border-radius:99px;
-  margin-bottom:20px;
-  overflow:hidden;
-  position:relative;
-}
+/* Bar */
+.bar-track{height:3px;background:rgba(255,255,255,.06);border-radius:99px;margin-bottom:18px;overflow:hidden;}
 .bar-fill{
-  height:100%;width:0%;
-  background:linear-gradient(90deg,#2250c4,#3878ff,#60a5fa);
-  border-radius:99px;
-  transition:width .45s cubic-bezier(.4,0,.2,1);
-  position:relative;
+  height:100%;width:0%;border-radius:99px;
+  background:linear-gradient(90deg,#1d4ed8,#3b82f6);
+  transition:width .5s cubic-bezier(.4,0,.2,1);
 }
-.bar-fill::after{
-  content:'';
-  position:absolute;right:0;top:0;bottom:0;width:40px;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.35));
-  border-radius:99px;
-}
-.bar-fill.done{
-  background:linear-gradient(90deg,#15803d,#22c55e);
-}
-.bar-fill.done::after{display:none;}
-.bar-fill.fail{
-  background:linear-gradient(90deg,#991b1b,#ef4444);
-}
-.bar-fill.fail::after{display:none;}
+.bar-fill.s-ok{background:linear-gradient(90deg,#15803d,#22c55e);width:100%!important;}
+.bar-fill.s-err{background:linear-gradient(90deg,#991b1b,#ef4444);width:100%!important;}
 
-/* ── Steps ────────────────────────────────────── */
-.steps{display:flex;flex-direction:column;gap:7px;margin-bottom:20px;}
-
+/* Steps */
+.steps{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
 .step{
-  display:flex;align-items:center;gap:11px;
-  padding:10px 13px;
+  display:flex;align-items:center;gap:10px;
+  padding:10px 12px;
   background:rgba(255,255,255,.02);
   border:1px solid rgba(255,255,255,.06);
-  border-radius:14px;
-  text-align:left;
+  border-radius:12px;text-align:left;
   transition:border-color .3s,background .3s;
 }
-.step.active{
-  border-color:rgba(56,120,255,.4);
-  background:rgba(56,120,255,.06);
-}
-.step.ok{border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.04);}
-.step.err{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.04);}
+.step.active{border-color:rgba(56,120,255,.35);background:rgba(56,120,255,.05);}
+.step.s-ok  {border-color:rgba(34,197,94,.25);background:rgba(34,197,94,.04);}
+.step.s-err {border-color:rgba(239,68,68,.3); background:rgba(239,68,68,.04);}
 
-/* step number dot */
 .dot{
-  width:24px;height:24px;flex-shrink:0;
-  border-radius:50%;
+  width:22px;height:22px;flex-shrink:0;border-radius:50%;
   background:rgba(255,255,255,.07);
   display:flex;align-items:center;justify-content:center;
-  font-size:.65rem;font-weight:700;color:#8090a8;
+  font-size:.6rem;font-weight:700;color:#556070;
   transition:background .3s,color .3s;
-  letter-spacing:0;
 }
 .step.active .dot{background:#3878ff;color:#fff;}
-.step.ok     .dot{background:#22c55e;color:#fff;}
-.step.err    .dot{background:#ef4444;color:#fff;}
+.step.s-ok   .dot{background:#22c55e;color:#fff;}
+.step.s-err  .dot{background:#ef4444;color:#fff;}
 
 .step-body{flex:1;min-width:0;}
-.step-label{font-size:.78rem;font-weight:600;color:#c8d5e8;}
-.step-info{
-  font-size:.68rem;color:#3d5070;margin-top:1px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.step.active .step-info{color:#607190;}
-.step.ok     .step-info{color:#166534;}
-.step.err    .step-info{color:#7f1d1d;}
+.step-name{font-size:.76rem;font-weight:600;color:#c0cfe8;}
+.step-info{font-size:.67rem;color:#374458;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.step.active .step-info{color:#5a7090;}
+.step.s-ok   .step-info{color:#166534;}
+.step.s-err  .step-info{color:#7f1d1d;}
 
-/* mini spinner inline */
-@keyframes s{to{transform:rotate(360deg)}}
-.mini-sp{
-  width:13px;height:13px;flex-shrink:0;
+@keyframes sp{to{transform:rotate(360deg)}}
+.sp{
+  width:12px;height:12px;flex-shrink:0;border-radius:50%;
   border:2px solid rgba(56,120,255,.15);
   border-top-color:#3878ff;
-  border-radius:50%;
-  animation:s .75s linear infinite;
+  animation:sp .7s linear infinite;
   display:none;
 }
-.step.active .mini-sp{display:block;}
+.step.active .sp{display:block;}
 
-/* ── Result pill ──────────────────────────────── */
+/* Result pill */
 .pill{
-  display:none;
-  padding:13px 15px;
-  border-radius:12px;
-  font-size:.8rem;font-weight:500;
-  line-height:1.6;
-  letter-spacing:-.01em;
-  text-align:left;
+  display:none;padding:12px 14px;border-radius:11px;
+  font-size:.78rem;font-weight:500;line-height:1.6;text-align:left;
 }
 .pill strong{font-weight:700;}
-.pill.ok{
-  display:block;
-  background:rgba(34,197,94,.08);
-  color:#4ade80;
-  border:1px solid rgba(34,197,94,.2);
-}
-.pill.err{
-  display:block;
-  background:rgba(239,68,68,.08);
-  color:#f87171;
-  border:1px solid rgba(239,68,68,.2);
-}
+.pill.s-ok {display:block;background:rgba(34,197,94,.07);color:#4ade80;border:1px solid rgba(34,197,94,.18);}
+.pill.s-err{display:block;background:rgba(239,68,68,.07);color:#f87171;border:1px solid rgba(239,68,68,.18);}
 
-/* ── Verified pulse ───────────────────────────── */
-@keyframes pulse{
-  0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.25)}
-  50%{box-shadow:0 0 0 10px rgba(34,197,94,0)}
-}
-.icon-zone.done .icon-bg{animation:pulse 1.8s ease infinite;}
+@keyframes pulse-ok{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.2)}50%{box-shadow:0 0 0 9px rgba(34,197,94,0)}}
+.icon-zone.state-ok .icon-bg{animation:pulse-ok 2s ease infinite;}
 </style>
 </head>
 <body>
 <div class="card">
 
-  <!-- Icon -->
   <div class="icon-zone" id="iconZone">
-    <div class="spin-ring" id="spinRing"></div>
+    <div class="spin-ring"></div>
     <div class="icon-bg"></div>
-    <!-- Shield (idle) -->
-    <svg id="svgShield" viewBox="0 0 24 24" fill="none"
-         stroke="#3878ff" stroke-width="1.8"
-         stroke-linecap="round" stroke-linejoin="round">
+    <svg id="iShield" viewBox="0 0 24 24" fill="none" stroke="#3878ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
       <polyline points="9 12 11 14 15 10"/>
     </svg>
-    <!-- Check (success) -->
-    <svg id="svgCheck" viewBox="0 0 24 24" fill="none" style="display:none"
-         stroke="#22c55e" stroke-width="2.2"
-         stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <polyline points="7 12 10.5 15.5 17 9"/>
+    <svg id="iCheck" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+      <circle cx="12" cy="12" r="10"/><polyline points="7 12 10.5 15.5 17 9"/>
     </svg>
-    <!-- X (fail) -->
-    <svg id="svgX" viewBox="0 0 24 24" fill="none" style="display:none"
-         stroke="#ef4444" stroke-width="2.2"
-         stroke-linecap="round" stroke-linejoin="round">
+    <svg id="iX" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
       <circle cx="12" cy="12" r="10"/>
-      <line x1="15" y1="9" x2="9" y2="15"/>
-      <line x1="9"  y1="9" x2="15" y2="15"/>
+      <line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
     </svg>
   </div>
 
-  <div class="title" id="mainTitle">Security Check</div>
-  <div class="sub"   id="mainSub">Verifying your identity…</div>
+  <div class="title" id="ttl">Security Check</div>
+  <div class="sub"   id="sub">Verifying your identity…</div>
 
-  <div class="bar-track">
-    <div class="bar-fill" id="bar"></div>
-  </div>
+  <div class="bar-track"><div class="bar-fill" id="bar"></div></div>
 
   <div class="steps">
     <div class="step active" id="s1">
       <div class="dot" id="d1">1</div>
       <div class="step-body">
-        <div class="step-label">Network</div>
+        <div class="step-name">Network</div>
         <div class="step-info" id="i1">Fetching IP…</div>
       </div>
-      <div class="mini-sp"></div>
+      <div class="sp"></div>
     </div>
-
     <div class="step" id="s2">
       <div class="dot" id="d2">2</div>
       <div class="step-body">
-        <div class="step-label">VPN / Proxy</div>
+        <div class="step-name">Device ID</div>
         <div class="step-info" id="i2">Waiting…</div>
       </div>
-      <div class="mini-sp"></div>
+      <div class="sp"></div>
     </div>
-
     <div class="step" id="s3">
       <div class="dot" id="d3">3</div>
       <div class="step-body">
-        <div class="step-label">Device ID</div>
+        <div class="step-name">Account Check</div>
         <div class="step-info" id="i3">Waiting…</div>
       </div>
-      <div class="mini-sp"></div>
-    </div>
-
-    <div class="step" id="s4">
-      <div class="dot" id="d4">4</div>
-      <div class="step-body">
-        <div class="step-label">Final Check</div>
-        <div class="step-info" id="i4">Waiting…</div>
-      </div>
-      <div class="mini-sp"></div>
+      <div class="sp"></div>
     </div>
   </div>
 
@@ -283,333 +181,208 @@ body::before{
 </div>
 
 <script>
-/* ═══════════════════════════════════════════════
-   Config — replace __BACKEND_URL__ before deploy
-═══════════════════════════════════════════════ */
+/* ── Config ───────────────────────────────────── */
 const BACKEND = "__BACKEND_URL__";
 
-/* ── Parse URL params safely ─────────────────── */
-(function(){
-  const p = new URLSearchParams(location.search);
-  window.UID    = parseInt(p.get("uid")    || "0", 10);
-  window.REF_ID = parseInt(p.get("ref")    || "0", 10);
-  window.MSG_ID = parseInt(p.get("msg_id") || "0", 10);
-})();
+const _p      = new URLSearchParams(location.search);
+const UID     = parseInt(_p.get("uid")    || "0", 10);
+const REF_ID  = parseInt(_p.get("ref")    || "0", 10);
+const MSG_ID  = parseInt(_p.get("msg_id") || "0", 10);
 
-/* ── Telegram WebApp ──────────────────────────── */
-const tg = window.Telegram?.WebApp || null;
+const tg      = window.Telegram?.WebApp || null;
 if(tg){ tg.ready(); tg.expand(); }
 const initData = tg?.initData || "";
 
-/* ── DOM refs ─────────────────────────────────── */
-const bar      = document.getElementById("bar");
-const pill     = document.getElementById("pill");
-const iconZone = document.getElementById("iconZone");
+/* ── DOM ──────────────────────────────────────── */
+const $bar      = document.getElementById("bar");
+const $pill     = document.getElementById("pill");
+const $iconZone = document.getElementById("iconZone");
 
-/* ── Bar ──────────────────────────────────────── */
-function setBar(pct){ bar.style.width = pct + "%"; }
+/* ── Helpers ──────────────────────────────────── */
+function setBar(p){ $bar.style.width = p + "%"; }
 
-/* ── Step helpers ─────────────────────────────── */
-function stepActivate(n){
-  const s = document.getElementById(`s${n}`);
-  s.classList.add("active");
+function activate(n){
+  document.getElementById(`s${n}`).classList.add("active");
+  document.getElementById(`i${n}`).textContent = "Running…";
 }
-function stepOk(n, info){
+function ok(n, info){
   const s = document.getElementById(`s${n}`);
-  s.classList.remove("active"); s.classList.add("ok");
+  s.classList.remove("active"); s.classList.add("s-ok");
   document.getElementById(`d${n}`).textContent = "✓";
-  document.getElementById(`i${n}`).textContent  = info;
+  document.getElementById(`i${n}`).textContent = info;
 }
-function stepErr(n, info){
+function err(n, info){
   const s = document.getElementById(`s${n}`);
-  s.classList.remove("active"); s.classList.add("err");
+  s.classList.remove("active"); s.classList.add("s-err");
   document.getElementById(`d${n}`).textContent = "✕";
-  document.getElementById(`i${n}`).textContent  = info;
+  document.getElementById(`i${n}`).textContent = info;
 }
 
-/* ── Final UI states ──────────────────────────── */
-function showSuccess(){
-  iconZone.classList.add("done");
-  document.getElementById("svgShield").style.display = "none";
-  document.getElementById("svgCheck").style.display  = "";
-  document.getElementById("mainTitle").textContent   = "Verified!";
-  document.getElementById("mainSub").textContent     = "All clear — returning to bot…";
-  bar.classList.add("done"); setBar(100);
-  pill.className   = "pill ok";
-  pill.textContent = "✅ Verification complete. Closing…";
+function showOK(){
+  $iconZone.classList.add("state-ok");
+  document.getElementById("iShield").style.display = "none";
+  document.getElementById("iCheck").style.display  = "";
+  document.getElementById("ttl").textContent = "Verified!";
+  document.getElementById("sub").textContent = "Welcome! Returning to bot…";
+  $bar.classList.add("s-ok");
+  $pill.className   = "pill s-ok";
+  $pill.textContent = "✅ Verification complete. Closing…";
   tg?.HapticFeedback?.notificationOccurred("success");
 }
-function showFail(reason){
-  iconZone.classList.add("fail");
-  document.getElementById("svgShield").style.display = "none";
-  document.getElementById("svgX").style.display      = "";
-  bar.classList.add("fail"); setBar(100);
-  pill.className = "pill err";
 
-  if(reason === "vpn"){
-    document.getElementById("mainTitle").textContent = "VPN Detected";
-    document.getElementById("mainSub").textContent   = "You must disable your VPN or proxy to continue.";
-    pill.innerHTML =
-      "🔒 <strong>Turn off your VPN / Proxy</strong>, then press the verify button again in the bot.";
+function showErr(reason){
+  $iconZone.classList.add("state-err");
+  document.getElementById("iShield").style.display = "none";
+  document.getElementById("iX").style.display      = "";
+  $bar.classList.add("s-err");
+  $pill.className = "pill s-err";
 
-  } else if(reason === "multi"){
-    document.getElementById("mainTitle").textContent = "Duplicate Account";
-    document.getElementById("mainSub").textContent   = "This device is already linked to another account.";
-    pill.innerHTML =
-      "👤 You are using a <strong>secondary account</strong>.<br>" +
-      "Please return to your <strong>first (main) account</strong> and invite real friends from there.";
-
+  if(reason === "multi"){
+    document.getElementById("ttl").textContent = "Duplicate Account";
+    document.getElementById("sub").textContent = "This device is already linked to another account.";
+    $pill.innerHTML =
+      "👤 You are joining with a <strong>secondary account</strong>.<br><br>" +
+      "Please open your <strong>first (main) Telegram account</strong> and use the invite link from there.<br><br>" +
+      "Only real referrals are accepted.";
+  } else if(reason === "vpn"){
+    document.getElementById("ttl").textContent = "VPN Detected";
+    document.getElementById("sub").textContent = "Please disable your VPN and try again.";
+    $pill.innerHTML =
+      "🔒 A <strong>VPN or Proxy</strong> is active on your connection.<br><br>" +
+      "Turn it off, then press the verify button in the bot again.";
   } else {
-    document.getElementById("mainTitle").textContent = "Access Denied";
-    document.getElementById("mainSub").textContent   = "Something went wrong. Please try again.";
-    pill.innerHTML = "❌ " + reason;
+    document.getElementById("ttl").textContent = "Access Denied";
+    document.getElementById("sub").textContent = "Unable to verify. Please try again.";
+    $pill.innerHTML = "❌ " + (reason || "Verification failed. Tap verify in the bot to retry.");
   }
 
   tg?.HapticFeedback?.notificationOccurred("error");
 }
-function closeApp(ms){ setTimeout(() => tg?.close(), ms); }
 
-/* ── Timeout fetch wrapper ────────────────────── */
-async function fetchTimeout(url, opts, ms){
-  const ctrl = new AbortController();
+function close(ms){ setTimeout(() => tg?.close(), ms); }
+
+/* ── Fetch with timeout ───────────────────────── */
+async function get(url, ms = 6000){
+  const ctrl  = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try{
-    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    const r = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
     return r;
-  }catch(e){
-    clearTimeout(timer);
-    throw e;
-  }
+  } catch(e){ clearTimeout(timer); throw e; }
 }
 
-/* ── Step 1: Get IP ───────────────────────────── */
-async function getIP(){
-  stepActivate(1); setBar(10);
+async function post(url, body, ms = 12000){
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
   try{
-    const r = await fetchTimeout("https://api.ipify.org?format=json", {}, 6000);
-    if(!r.ok) throw new Error("non-ok");
-    const d = await r.json();
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    return r;
+  } catch(e){ clearTimeout(timer); throw e; }
+}
+
+/* ══════════════════════════════════════════════
+   STEP 1 — Get IP (soft, never blocks)
+══════════════════════════════════════════════ */
+async function getIP(){
+  activate(1); setBar(10);
+  try{
+    const r  = await get("https://api.ipify.org?format=json");
+    const d  = await r.json();
     const ip = (d.ip || "").trim() || "unknown";
-    stepOk(1, ip); setBar(25);
+    ok(1, ip); setBar(30);
     return ip;
-  }catch{
-    stepOk(1, "Fetched (fallback)"); setBar(25);
+  } catch{
+    ok(1, "Resolved"); setBar(30);
     return "unknown";
   }
 }
 
-/* ── WebRTC local IP leak detector ───────────── */
-function getWebRTCIPs(){
-  return new Promise(resolve => {
-    const ips = new Set();
-    let done  = false;
-    const finish = () => { done = true; resolve([...ips]); };
-    setTimeout(finish, 2500); // max wait
-
-    try{
-      const pc = new RTCPeerConnection({ iceServers:[{urls:"stun:stun.l.google.com:19302"}] });
-      pc.createDataChannel("");
-      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(finish);
-      pc.onicecandidate = e => {
-        if(!e || !e.candidate){ if(!done) finish(); return; }
-        // extract IPs from candidate string
-        const regex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/g;
-        let m;
-        while((m = regex.exec(e.candidate.candidate)) !== null){
-          ips.add(m[1]);
-        }
-      };
-    }catch{ finish(); }
-  });
-}
-
-/* ── VPN IP range check ───────────────────────── */
-function isVpnLocalIP(ip){
-  // VPN tunnel adapters almost always assign these ranges
-  if(!ip) return false;
-  const parts = ip.split(".").map(Number);
-  const p0 = parts[0], p1 = parts[1];
-  // 10.0.0.0/8  → common VPN / tunnel
-  if(p0 === 10) return true;
-  // 172.16.0.0–172.31.0.0/12
-  if(p0 === 172 && p1 >= 16 && p1 <= 31) return true;
-  // NOT 192.168 — that's normal LAN, skip
-  return false;
-}
-
-/* ── Timezone vs IP country mismatch ─────────── */
-function getDeviceTimezone(){
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-}
-
-// timezone prefix → rough continent/region
-function tzRegion(tz){
-  if(!tz) return "";
-  const t = tz.toLowerCase();
-  if(t.startsWith("africa"))  return "AF";
-  if(t.startsWith("america")) return "AM";
-  if(t.startsWith("asia"))    return "AS";
-  if(t.startsWith("europe"))  return "EU";
-  if(t.startsWith("pacific")) return "PA";
-  if(t.startsWith("atlantic"))return "AT";
-  if(t.startsWith("indian"))  return "IN";
-  if(t.startsWith("australia") || t.startsWith("pacific/auckland")) return "OC";
-  return "";
-}
-
-/* ── Step 2: VPN / Proxy — multi-signal ──────── */
-async function checkVPN(ip){
-  stepActivate(2); setBar(32);
-  document.getElementById("i2").textContent = "Running 3 checks…";
-
-  const signals   = [];
-  const flagged   = [];
-
-  /* ── Signal A: WebRTC local IP leak ── */
-  try{
-    const localIPs = await getWebRTCIPs();
-    const vpnLocal = localIPs.filter(isVpnLocalIP);
-    if(vpnLocal.length > 0){
-      // Real VPN tunnel IP exposed — hard signal
-      signals.push(`WebRTC: ${vpnLocal[0]}`);
-      flagged.push("webrtc_vpn_ip");
-    } else {
-      // Clean LAN IP (192.168.x.x) or no IP at all — both are normal, never flag
-      signals.push("WebRTC: clean");
-    }
-  }catch{
-    // WebRTC not supported — not suspicious
-    signals.push("WebRTC: n/a");
-  }
-
-  setBar(40);
-
-  /* ── Signal B: IP reputation (proxycheck.io) ── */
-  let ipRepVpn = false;
-  let ipCountry = "";
-  if(ip && ip !== "unknown"){
-    try{
-      const r = await fetchTimeout(
-        `https://proxycheck.io/v2/${encodeURIComponent(ip)}?vpn=1&asn=1`,
-        {}, 5000
-      );
-      if(r.ok){
-        const d    = await r.json();
-        const info = d[ip] || {};
-        ipRepVpn   = info.proxy === "yes" || info.vpn === "yes" ||
-                     info.type  === "VPN"  || info.type === "TOR" ||
-                     info.type  === "Hosting";
-        ipCountry  = (info.country || "").toUpperCase();
-        if(ipRepVpn){
-          signals.push(`IP rep: flagged (${info.type || "proxy"})`);
-          flagged.push("ip_reputation");
-        } else {
-          signals.push(`IP rep: clean (${ipCountry})`);
-        }
-      }
-    }catch{
-      signals.push("IP rep: timeout");
-    }
-  } else {
-    signals.push("IP rep: no IP");
-  }
-
-  setBar(47);
-
-  /* ── Signal C: Timezone vs IP country mismatch ── */
-  const tz        = getDeviceTimezone();
-  const devRegion = tzRegion(tz);
-
-  // map IP country → expected timezone region (rough)
-  const countryRegion = {
-    ET:"AF",DJ:"AF",ER:"AF",SO:"AF",KE:"AF",TZ:"AF",UG:"AF",SD:"AF",
-    NG:"AF",GH:"AF",CM:"AF",SN:"AF",ZA:"AF",EG:"AF",MA:"AF",TN:"AF",
-    US:"AM",CA:"AM",MX:"AM",BR:"AM",AR:"AM",CO:"AM",PE:"AM",CL:"AM",
-    GB:"EU",DE:"EU",FR:"EU",IT:"EU",ES:"EU",NL:"EU",SE:"EU",NO:"EU",
-    PL:"EU",TR:"EU",UA:"EU",RU:"EU",
-    CN:"AS",JP:"AS",KR:"AS",IN:"AS",PK:"AS",ID:"AS",TH:"AS",VN:"AS",
-    PH:"AS",BD:"AS",SA:"AS",AE:"AS",IR:"AS",IQ:"AS",SY:"AS",
-    AU:"OC",NZ:"OC",
-  };
-
-  const expectedRegion = countryRegion[ipCountry] || "";
-  const mismatch = (expectedRegion && devRegion && expectedRegion !== devRegion);
-
-  if(mismatch){
-    signals.push(`TZ mismatch: device=${devRegion} IP=${expectedRegion}`);
-    flagged.push("tz_mismatch");
-  } else {
-    signals.push(`TZ: ${tz.split("/")[0] || "ok"}`);
-  }
-
-  setBar(50);
-
-  /* ── Decision logic ─────────────────────────── */
-  // ONLY block on hard proof — never on timezone alone or combination guesses
-  // Rule 1: IP reputation from proxycheck says VPN/proxy/TOR → block
-  // Rule 2: WebRTC leaks a VPN tunnel IP (10.x.x.x or 172.16-31.x.x) → block
-  // Rule 3: BOTH webrtc blocked AND ip_reputation flagged → block
-  // Timezone mismatch = NEVER used for blocking, only logged for backend
-  const hardBlock =
-    flagged.includes("ip_reputation") ||
-    flagged.includes("webrtc_vpn_ip");
-
-  if(hardBlock){
-    const reasons = signals
-      .filter(s => s.includes("flagged") || s.includes("VPN") || s.includes("10.") || s.includes("172."))
-      .join(" · ");
-    stepErr(2, reasons || "VPN / Proxy detected");
-  } else {
-    stepOk(2, "Clean ✓");
-  }
-
-  return { isVpn: hardBlock, signals, flagged };
-}
-
-/* ── Step 3: Device fingerprint ──────────────── */
+/* ══════════════════════════════════════════════
+   STEP 2 — Device Fingerprint
+   Collects as many stable signals as possible.
+   The backend decides if it's a duplicate.
+══════════════════════════════════════════════ */
 async function getFingerprint(){
-  stepActivate(3); setBar(60);
-  const parts = [];
+  activate(2); setBar(40);
+  const P = [];
 
-  /* Canvas */
+  /* Canvas 2D */
   try{
-    const c = document.createElement("canvas");
-    c.width = 220; c.height = 30;
+    const c   = document.createElement("canvas");
+    c.width   = 240; c.height = 60;
     const ctx = c.getContext("2d");
-    ctx.textBaseline = "top";
-    ctx.font = "14px Arial";
-    ctx.fillStyle = "#f60";
-    ctx.fillRect(125, 1, 62, 20);
-    ctx.fillStyle = "#069";
-    ctx.fillText("verifyBot🔐", 2, 15);
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle    = "#f0f";
+    ctx.fillRect(0, 0, 240, 60);
     ctx.fillStyle = "rgba(102,204,0,.7)";
-    ctx.fillText("verifyBot🔐", 4, 17);
-    parts.push(c.toDataURL());
-  }catch{ parts.push("nc"); }
+    ctx.font      = "15px 'Arial'";
+    ctx.fillText("Squad4xx🔐verify", 4, 20);
+    ctx.fillStyle    = "#0cf";
+    ctx.font         = "bold 13px 'Times New Roman'";
+    ctx.fillText("fingerprint_2025", 10, 45);
+    P.push("cv:" + c.toDataURL().slice(-80));
+  } catch{ P.push("cv:x"); }
 
-  /* WebGL */
+  /* WebGL renderer */
   try{
     const cv = document.createElement("canvas");
     const gl = cv.getContext("webgl") || cv.getContext("experimental-webgl");
     if(gl){
-      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
-      parts.push(gl.getParameter(dbg?.UNMASKED_VENDOR_WEBGL   || 37445));
-      parts.push(gl.getParameter(dbg?.UNMASKED_RENDERER_WEBGL || 37446));
-    } else parts.push("nw");
-  }catch{ parts.push("nw"); }
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      P.push("gl_v:" + gl.getParameter(ext?.UNMASKED_VENDOR_WEBGL   || 37445));
+      P.push("gl_r:" + gl.getParameter(ext?.UNMASKED_RENDERER_WEBGL || 37446));
+      /* WebGL precision fingerprint */
+      const vs = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER,   gl.HIGH_FLOAT);
+      const fs = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+      P.push("gl_p:" + vs?.precision + "," + fs?.precision);
+    } else P.push("gl:x");
+  } catch{ P.push("gl:x"); }
 
-  /* Screen / Device */
-  parts.push(`${screen.width}x${screen.height}x${screen.colorDepth}`);
-  parts.push(`dpr:${devicePixelRatio || 1}`);
-  parts.push(Intl.DateTimeFormat().resolvedOptions().timeZone || "tz-unknown");
-  parts.push(navigator.hardwareConcurrency || 0);
-  parts.push(navigator.deviceMemory        || 0);
-  parts.push(navigator.platform            || "");
-  parts.push(navigator.language            || "");
-  parts.push(navigator.userAgent           || "");
+  /* Screen */
+  P.push("sc:" + screen.width + "x" + screen.height + "x" + screen.colorDepth);
+  P.push("dpr:" + (devicePixelRatio || 1));
+  P.push("tz:" + (Intl.DateTimeFormat().resolvedOptions().timeZone || ""));
 
-  /* Audio */
+  /* Hardware */
+  P.push("cpu:" + (navigator.hardwareConcurrency || 0));
+  P.push("mem:" + (navigator.deviceMemory        || 0));
+  P.push("plat:" + (navigator.platform           || ""));
+  P.push("lang:" + (navigator.language           || ""));
+  P.push("langs:" + (navigator.languages || []).join(","));
+
+  /* Touch / input */
+  P.push("touch:" + navigator.maxTouchPoints);
+
+  /* User agent */
+  P.push("ua:" + navigator.userAgent);
+
+  /* Font detection — test a few fonts */
+  try{
+    const base  = "monospace";
+    const test  = ["Arial","Helvetica","Georgia","Verdana","Tahoma","Trebuchet MS","Impact","Comic Sans MS","Courier New"];
+    const span  = document.createElement("span");
+    span.style.cssText = "position:absolute;visibility:hidden;font-size:72px;";
+    span.textContent   = "mmmmmmmmmmlli";
+    document.body.appendChild(span);
+    span.style.fontFamily = base;
+    const baseW = span.offsetWidth, baseH = span.offsetHeight;
+    const found = [];
+    for(const f of test){
+      span.style.fontFamily = `'${f}',${base}`;
+      if(span.offsetWidth !== baseW || span.offsetHeight !== baseH) found.push(f);
+    }
+    document.body.removeChild(span);
+    P.push("fonts:" + found.join("|"));
+  } catch{ P.push("fonts:x"); }
+
+  /* Audio fingerprint */
   try{
     const AC = window.AudioContext || window.webkitAudioContext;
     if(AC){
@@ -618,96 +391,97 @@ async function getFingerprint(){
       const an  = ac.createAnalyser();
       const g   = ac.createGain();
       g.gain.value = 0;
+      osc.type = "triangle";
+      osc.frequency.value = 10000;
       osc.connect(an); an.connect(g); g.connect(ac.destination);
       osc.start(0);
+      await new Promise(r => setTimeout(r, 100));
       const buf = new Float32Array(an.frequencyBinCount);
       an.getFloatFrequencyData(buf);
       osc.stop(); ac.close();
-      parts.push(Array.from(buf.slice(0,8)).join(","));
-    } else parts.push("na");
-  }catch{ parts.push("na"); }
+      const sum = buf.slice(0, 30).reduce((a, v) => a + Math.abs(v), 0);
+      P.push("au:" + sum.toFixed(4));
+    } else P.push("au:x");
+  } catch{ P.push("au:x"); }
 
-  /* Hash */
-  const raw = parts.join("|||");
+  /* Plugins count (desktop) */
+  P.push("pl:" + (navigator.plugins?.length || 0));
+
+  /* Cookie / storage flags */
+  P.push("ck:" + navigator.cookieEnabled);
+
+  /* Hash everything → SHA-256 */
+  const raw = P.join("|||");
   const enc = new TextEncoder().encode(raw);
   const buf = await crypto.subtle.digest("SHA-256", enc);
   const fp  = Array.from(new Uint8Array(buf))
                    .map(b => b.toString(16).padStart(2,"0")).join("");
 
-  stepOk(3, fp.slice(0,14) + "…"); setBar(80);
-  return fp;
+  ok(2, fp.slice(0,12) + "…"); setBar(65);
+  return { fp, raw: P }; // send raw signals too so backend can compare partial matches
 }
 
-/* ── Step 4: Submit to backend ───────────────── */
-async function submit(ip, vpnResult, fp){
-  stepActivate(4);
-  document.getElementById("i4").textContent = "Sending to server…";
-  setBar(90);
+/* ══════════════════════════════════════════════
+   STEP 3 — Submit to backend & show result
+══════════════════════════════════════════════ */
+async function submit(ip, fpData){
+  activate(3);
+  document.getElementById("i3").textContent = "Checking…";
+  setBar(80);
 
-  const payload = {
-    uid:         window.UID,
-    refId:       window.REF_ID,
-    msgId:       window.MSG_ID,
+  const r = await post(`${BACKEND}/api/verify`, {
+    uid:        UID,
+    refId:      REF_ID,
+    msgId:      MSG_ID,
     initData,
     ip,
-    userAgent:   navigator.userAgent,
-    fingerprint: fp,
-    isVpn:       vpnResult.isVpn,
-    vpnSignals:  vpnResult.signals,   // full signal log for backend audit
-    vpnFlagged:  vpnResult.flagged    // which checks triggered
-  };
+    userAgent:  navigator.userAgent,
+    fingerprint: fpData.fp,
+    fpSignals:  fpData.raw,   // backend can do partial-match multi-account detection
+    timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone,
+    language:   navigator.language,
+    platform:   navigator.platform,
+    screen:     screen.width + "x" + screen.height
+  });
 
-  const r = await fetchTimeout(
-    `${BACKEND}/api/verify`,
-    {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload)
-    },
-    10000
-  );
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  if(!r.ok) throw new Error(`Server error ${r.status}`);
   return await r.json();
 }
 
-/* ═══════════════════════════════════════════════
-   Main flow
-═══════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════
+   Main
+══════════════════════════════════════════════ */
 (async () => {
   try{
-    const ip        = await getIP();
-    const vpnResult = await checkVPN(ip);
+    const ip     = await getIP();
+    const fpData = await getFingerprint();
+    const result = await submit(ip, fpData);
 
-    if(vpnResult.isVpn){
-      stepErr(3, "Skipped");
-      stepErr(4, "Blocked — VPN detected");
-      showFail("vpn");
-      closeApp(4500);
-      return;
-    }
-
-    const fp     = await getFingerprint();
-    const result = await submit(ip, vpnResult, fp);
     setBar(100);
 
     if(result.status === "verified" || result.status === "already_verified"){
-      stepOk(4, "Verified ✓");
-      showSuccess();
-      closeApp(2200);
+      ok(3, "Verified ✓");
+      showOK();
+      close(2200);
 
     } else if(result.status === "blocked"){
-      const reason = result.reason === "vpn" ? "vpn" : "multi";
-      stepErr(4, reason === "vpn" ? "Blocked — VPN" : "Blocked — Multi-account");
-      showFail(reason);
-      closeApp(4500);
+      const reason = result.reason || "unknown";
+      if(reason === "vpn"){
+        err(3, "Blocked — VPN");
+        showErr("vpn");
+      } else {
+        err(3, "Blocked — duplicate device");
+        showErr("multi");
+      }
+      close(5000);
 
     } else {
-      throw new Error(`Unexpected status: ${result.status}`);
+      throw new Error("Unexpected response from server");
     }
 
-  }catch(e){
-    stepErr(4, "Error — please retry");
-    showFail(e.message || "Connection failed. Try again.");
+  } catch(e){
+    err(3, "Failed — tap verify again");
+    showErr(e.message?.includes("Server error") ? e.message : null);
     console.error("[verify]", e);
   }
 })();
