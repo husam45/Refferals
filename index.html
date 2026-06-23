@@ -201,8 +201,11 @@ const $iconZone = document.getElementById("iconZone");
 /* ── Helpers ──────────────────────────────────── */
 function setBar(p){ $bar.style.width = p + "%"; }
 
+// የድሮዎቹን ክላሶች በማጽዳት ስቴቱን በትክክል ለመቀያየር የተሻሻለ
 function activate(n){
-  document.getElementById(`s${n}`).classList.add("active");
+  const el = document.getElementById(`s${n}`);
+  el.classList.remove("s-ok", "s-err");
+  el.classList.add("active");
   document.getElementById(`i${n}`).textContent = "Running…";
 }
 function ok(n, info){
@@ -231,25 +234,28 @@ function showOK(){
 }
 
 function showErr(reason){
+  $iconZone.classList.remove("state-ok");
   $iconZone.classList.add("state-err");
   document.getElementById("iShield").style.display = "none";
+  document.getElementById("iCheck").style.display  = "none";
   document.getElementById("iX").style.display      = "";
+  $bar.classList.remove("s-ok");
   $bar.classList.add("s-err");
   $pill.className = "pill s-err";
 
-  if(reason === "multi"){
+  if(reason === "vpn"){
+    document.getElementById("ttl").textContent = "VPN Detected";
+    document.getElementById("sub").textContent = "Please disable your VPN and try again.";
+    $pill.innerHTML =
+      "🔒 A <strong>VPN or Proxy</strong> is active on your connection.<br><br>" +
+      "Turn it off, then press the verify button in the bot again.";
+  } else if(reason === "multi" || reason === "clone"){
     document.getElementById("ttl").textContent = "Duplicate Account";
     document.getElementById("sub").textContent = "This device is already linked to another account.";
     $pill.innerHTML =
       "👤 You are joining with a <strong>secondary account</strong>.<br><br>" +
       "Please open your <strong>first (main) Telegram account</strong> and use the invite link from there.<br><br>" +
       "Only real referrals are accepted.";
-  } else if(reason === "vpn"){
-    document.getElementById("ttl").textContent = "VPN Detected";
-    document.getElementById("sub").textContent = "Please disable your VPN and try again.";
-    $pill.innerHTML =
-      "🔒 A <strong>VPN or Proxy</strong> is active on your connection.<br><br>" +
-      "Turn it off, then press the verify button in the bot again.";
   } else {
     document.getElementById("ttl").textContent = "Access Denied";
     document.getElementById("sub").textContent = "Unable to verify. Please try again.";
@@ -259,7 +265,7 @@ function showErr(reason){
   tg?.HapticFeedback?.notificationOccurred("error");
 }
 
-function close(ms){ setTimeout(() => tg?.close(), ms); }
+function closeApp(ms){ setTimeout(() => tg?.close(), ms); }
 
 /* ── Fetch with timeout ───────────────────────── */
 async function get(url, ms = 6000){
@@ -306,8 +312,6 @@ async function getIP(){
 
 /* ══════════════════════════════════════════════
    STEP 2 — Device Fingerprint
-   Collects as many stable signals as possible.
-   The backend decides if it's a duplicate.
 ══════════════════════════════════════════════ */
 async function getFingerprint(){
   activate(2); setBar(40);
@@ -326,7 +330,7 @@ async function getFingerprint(){
     ctx.fillText("Squad4xx🔐verify", 4, 20);
     ctx.fillStyle    = "#0cf";
     ctx.font         = "bold 13px 'Times New Roman'";
-    ctx.fillText("fingerprint_2025", 10, 45);
+    ctx.fillText("fingerprint_2026", 10, 45);
     P.push("cv:" + c.toDataURL().slice(-80));
   } catch{ P.push("cv:x"); }
 
@@ -338,49 +342,27 @@ async function getFingerprint(){
       const ext = gl.getExtension("WEBGL_debug_renderer_info");
       P.push("gl_v:" + gl.getParameter(ext?.UNMASKED_VENDOR_WEBGL   || 37445));
       P.push("gl_r:" + gl.getParameter(ext?.UNMASKED_RENDERER_WEBGL || 37446));
-      /* WebGL precision fingerprint */
       const vs = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER,   gl.HIGH_FLOAT);
       const fs = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
       P.push("gl_p:" + vs?.precision + "," + fs?.precision);
     } else P.push("gl:x");
   } catch{ P.push("gl:x"); }
 
-  /* Screen */
   P.push("sc:" + screen.width + "x" + screen.height + "x" + screen.colorDepth);
   P.push("dpr:" + (devicePixelRatio || 1));
-  P.push("tz:" + (Intl.DateTimeFormat().resolvedOptions().timeZone || ""));
+  
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
+  P.push("tz:" + tz);
 
-  /* Hardware */
   P.push("cpu:" + (navigator.hardwareConcurrency || 0));
   P.push("mem:" + (navigator.deviceMemory        || 0));
   P.push("plat:" + (navigator.platform           || ""));
-  P.push("lang:" + (navigator.language           || ""));
+  
+  const lang = navigator.language || "en";
+  P.push("lang:" + lang);
   P.push("langs:" + (navigator.languages || []).join(","));
-
-  /* Touch / input */
   P.push("touch:" + navigator.maxTouchPoints);
-
-  /* User agent */
   P.push("ua:" + navigator.userAgent);
-
-  /* Font detection — test a few fonts */
-  try{
-    const base  = "monospace";
-    const test  = ["Arial","Helvetica","Georgia","Verdana","Tahoma","Trebuchet MS","Impact","Comic Sans MS","Courier New"];
-    const span  = document.createElement("span");
-    span.style.cssText = "position:absolute;visibility:hidden;font-size:72px;";
-    span.textContent   = "mmmmmmmmmmlli";
-    document.body.appendChild(span);
-    span.style.fontFamily = base;
-    const baseW = span.offsetWidth, baseH = span.offsetHeight;
-    const found = [];
-    for(const f of test){
-      span.style.fontFamily = `'${f}',${base}`;
-      if(span.offsetWidth !== baseW || span.offsetHeight !== baseH) found.push(f);
-    }
-    document.body.removeChild(span);
-    P.push("fonts:" + found.join("|"));
-  } catch{ P.push("fonts:x"); }
 
   /* Audio fingerprint */
   try{
@@ -404,21 +386,23 @@ async function getFingerprint(){
     } else P.push("au:x");
   } catch{ P.push("au:x"); }
 
-  /* Plugins count (desktop) */
   P.push("pl:" + (navigator.plugins?.length || 0));
-
-  /* Cookie / storage flags */
   P.push("ck:" + navigator.cookieEnabled);
 
-  /* Hash everything → SHA-256 */
-  const raw = P.join("|||");
-  const enc = new TextEncoder().encode(raw);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  const fp  = Array.from(new Uint8Array(buf))
+  let fp = "";
+  try {
+    const raw = P.join("|||");
+    const enc = new TextEncoder().encode(raw);
+    const buf = await crypto.subtle.digest("SHA-256", enc);
+    fp  = Array.from(new Uint8Array(buf))
                    .map(b => b.toString(16).padStart(2,"0")).join("");
+  } catch (e) {
+    // ፊንገርፕሪንት መስራት ቢያቅተው ባዶ እንዳይሆን Random string መፍጠር (ባክኤንድ እንዳያግደው)
+    fp = "fallback_" + Math.random().toString(36).substring(2) + Date.now();
+  }
 
   ok(2, fp.slice(0,12) + "…"); setBar(65);
-  return { fp, raw: P }; // send raw signals too so backend can compare partial matches
+  return { fp, raw: P, tz, lang };
 }
 
 /* ══════════════════════════════════════════════
@@ -429,19 +413,21 @@ async function submit(ip, fpData){
   document.getElementById("i3").textContent = "Checking…";
   setBar(80);
 
+  // የሰዓት እና ቋንቋ አለመጣጣምን (Mismatches) በመፈተሽ የቪፒኤን ፍንጭ መውሰጃ
+  let clientSideVpnHint = false;
+  if(fpData.tz && fpData.tz.toLowerCase().includes("ethiopia") === false && fpData.lang.startsWith("am")) {
+    clientSideVpnHint = true; 
+  }
+
   const r = await post(`${BACKEND}/api/verify`, {
-    uid:        UID,
-    refId:      REF_ID,
-    msgId:      MSG_ID,
-    initData,
-    ip,
-    userAgent:  navigator.userAgent,
+    uid:         UID,
+    refId:       REF_ID,
+    msgId:       MSG_ID,
+    initData:    initData,
+    ip:          ip,
+    ua:          navigator.userAgent, // ከባክኤንድ 'ua' ጋር የተናበበ ስም
     fingerprint: fpData.fp,
-    fpSignals:  fpData.raw,   // backend can do partial-match multi-account detection
-    timezone:   Intl.DateTimeFormat().resolvedOptions().timeZone,
-    language:   navigator.language,
-    platform:   navigator.platform,
-    screen:     screen.width + "x" + screen.height
+    isVpn:       clientSideVpnHint
   });
 
   if(!r.ok) throw new Error(`Server error ${r.status}`);
@@ -449,7 +435,7 @@ async function submit(ip, fpData){
 }
 
 /* ══════════════════════════════════════════════
-   Main
+   Main Execution
 ══════════════════════════════════════════════ */
 (async () => {
   try{
@@ -462,26 +448,22 @@ async function submit(ip, fpData){
     if(result.status === "verified" || result.status === "already_verified"){
       ok(3, "Verified ✓");
       showOK();
-      close(2200);
+      closeApp(2200);
 
     } else if(result.status === "blocked"){
-      const reason = result.reason || "unknown";
-      if(reason === "vpn"){
-        err(3, "Blocked — VPN");
-        showErr("vpn");
-      } else {
-        err(3, "Blocked — duplicate device");
-        showErr("multi");
-      }
-      close(5000);
+      err(3, "Access Denied ✕");
+      // ባክኤንዱ የላከውን ትክክለኛ ምክንያት ለይቶ ማሳያ
+      const reason = result.reason || "multi"; 
+      showErr(reason);
+      closeApp(6000);
 
     } else {
       throw new Error("Unexpected response from server");
     }
 
   } catch(e){
-    err(3, "Failed — tap verify again");
-    showErr(e.message?.includes("Server error") ? e.message : null);
+    err(3, "Failed — retry");
+    showErr(e.message?.includes("Server error") ? e.message : "Verification failed. Please retry.");
     console.error("[verify]", e);
   }
 })();
