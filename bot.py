@@ -47,12 +47,12 @@ logger = logging.getLogger("ReferralBotSystem")
 
 BOT_TOKEN            = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS            = [int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip()]
-PAYMENT_LOG_CHANNEL  = os.getenv("PAYMENT_LOG_CHANNEL", "").strip() # ምሳሌ፡ -100xxxxxx ወይም @channel
+PAYMENT_LOG_CHANNEL  = os.getenv("PAYMENT_LOG_CHANNEL", "").strip()
 WEBAPP_URL           = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("/")
 PROXYCHECK_API_KEY   = os.getenv("PROXYCHECK_API_KEY", "")
 DB_PATH              = "referral_bot.db"
 
-# የቴሌብር ክፍያ ማረጋገጫ ፎቶ File ID (በራስህ መተካት ትችላለህ)
+# የቴሌብር ክፍያ ማረጋገጫ ፎቶ File ID
 TELEBIRR_PROOF_IMAGE = "AgACAgQAAxkBAAOYai38ooud5iofBd3aDGuCiX273t8AAj4PaxsYl3BR78MpfA_cDpkBAAMCAAN4AAM8BA"
 
 if not WEBAPP_URL.startswith(("http://", "https://")):
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS force_channels (
     channel_id   TEXT UNIQUE,
     channel_name TEXT,
     invite_link  TEXT,
-    bot_added    INTEGER DEFAULT 0  -- 0 = Real Admin Check, 1 = Fake (No Admin) Clone Check
+    bot_added    INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -157,13 +157,10 @@ class DataEngine:
 
     @staticmethod
     async def get_referral_metrics(user_id: int):
-        """ አድሚን ፓናል ላይ የሚታይ እጅግ ዝርዝር የሪፈራል መረጃ ማውጫ """
         async with aiosqlite.connect(DB_PATH) as db:
-            # 1. ቀጥታ የጋበዛቸው ሰዎች ብዛት (Direct Referrals)
             cur1 = await db.execute("SELECT COUNT(*) FROM users WHERE referred_by = ?", (user_id,))
             direct_count = (await cur1.fetchone())[0] or 0
 
-            # 2. የሱ ተጋባዦች ደግሞ መልሰው የጋበዟቸው ሰዎች ብዛት (Tier-2 Referrals)
             cur2 = await db.execute(
                 "SELECT COUNT(*) FROM users WHERE referred_by IN "
                 "(SELECT user_id FROM users WHERE referred_by = ?)", (user_id,)
@@ -302,43 +299,35 @@ dp         = Dispatcher(storage=MemoryStorage())
 core_router = Router()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FORCE JOIN LOGING (REAL vs FAKE/MASMESAYA)
+# FORCE JOIN LOGIC (REAL vs FAKE/MASMESAYA)
 # ─────────────────────────────────────────────────────────────────────────────
 async def inspect_compulsory_memberships(user_id: int) -> list:
-    """ አዲስ ሰው እና Left ያሉ ሰዎችን ለይቶ ያልገቡባቸውን ቻናሎች ብቻ መመለሻ """
     channels = await DataEngine.get_force_channels()
     unjoined = []
     for ch in channels:
         if ch["bot_added"] == 1:
-            # 🟡 ማስመሰያ (Fake Force Join)፦ እውነተኛ የቦት አድሚን ፍተሻ አይደረግም፣ ተጠቃሚው እንዳይነቃበት ዝርዝሩ ውስጥ ይካተታል
             continue
         else:
-            # 🔴 እውነተኛ ፍተሻ (Real Admin check)
             try:
                 m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
                 if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
                     unjoined.append(dict(ch))
             except Exception:
-                unjoined.append(dict(ch)) # ቦቱ መፈተሽ ካልቻለ እንደ አልገባ ይቆጥረዋል
+                unjoined.append(dict(ch))
     return unjoined
 
 async def enforce_membership_gate(event, user_id: int) -> bool:
     unjoined = await inspect_compulsory_memberships(user_id)
-    
-    # ሁሉንም ቻናሎች ለማካተት (የማስመሰያዎቹንም ጭምር ለተጠቃሚው ማሳያ ቁልፍ መስሪያ)
     all_db_channels = await DataEngine.get_force_channels()
     
     if not unjoined:
         return True
 
     buttons = []
-    # ተጠቃሚው LEFT ያላቸውን እውነተኛ ቻናሎች + ማስመሰያዎቹን አንድ ላይ ቀላቅሎ ማሳያ (ሳይነቃበት)
     for ch in all_db_channels:
-        # እውነተኛ ከሆነና ጆይን ካደረገው አይታይም፣ ካላደረገ ግን ይታያል
         if ch["bot_added"] == 0 and ch in unjoined:
             buttons.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch["invite_link"])])
         elif ch["bot_added"] == 1:
-            # ማስመሰያዎቹ ሁልጊዜም ለደህንነት ሲባል ቁልፉ ላይ ይታያሉ (እንዳይነቃ የትኛውን እንደወጣ እንዳያውቅ)
             buttons.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch["invite_link"])])
 
     buttons.append([InlineKeyboardButton(text="✅ Joined — Verify Status", callback_data="ui_revalidate_channels")])
@@ -429,7 +418,6 @@ async def process_start_command(message: Message, state: FSMContext):
     if acc and acc["is_banned"]:
         return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted.")
 
-    # ቻናል Left ያደረጉ ሰዎችን እዚህ ጋር ይይዛቸዋል
     if not await enforce_membership_gate(message, uid):
         if ref: await state.update_data(stashed_referrer_id=ref)
         return
@@ -490,7 +478,7 @@ async def process_link_generation(callback: CallbackQuery):
     await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WITHDRAWAL CORE LOGIC & PROOF HANDLERS
+# WITHDRAWAL CORE LOGIC & PROOF HANDLERS (REPLY MODE)
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
 async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
@@ -558,29 +546,26 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     await DataEngine.add_balance(uid, -s["validated_volume"])
     await state.clear()
 
-    # 1. 📢 WITHDRAWAL REQUEST ወደ LOG/PROOF ቻናል መላክ
+    # 1. ⏳ ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST ፖስት ማድረግ
     post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
-            alias = f"@{user['username']}" if user["username"] else "Private Profile"
-            txt   = (
-                f"⏳ <b>NEW WITHDRAWAL REQUEST / አዲስ ጥያቄ</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"👤 <b>Name:</b> {s['validated_title']}\n"
-                f"🆔 <b>User:</b> {alias}\n"
-                f"💰 <b>Amount:</b> <code>{s['validated_volume']:.2f} ETB</code>\n"
-                f"📲 <b>Method:</b> Telebirr\n"
-                f"⏱ <b>Status:</b> Pending Review...\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            txt = (
+                f"⏳ <b>NEW WITHDRAWAL REQUEST</b>\n\n"
+                f"👤 <b>User Node:</b> {user['full_name']}\n"
+                f"🆔 <b>User ID:</b> <code>{uid}</code>\n"
+                f"💰 <b>Requested Amount:</b> ETB {s['validated_volume']:.2f}\n"
+                f"📱 <b>Method:</b> Telebirr Portal\n"
+                f"📊 <b>Status:</b> Pending Verification ⏳\n\n"
+                f"⏰ <b>Timestamp:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
             receipt = await bot.send_message(PAYMENT_LOG_CHANNEL, txt)
             post_id = receipt.message_id
             await DataEngine.update_withdrawal_status(tid, "pending", post_id)
         except Exception as e:
-            logger.error(f"Proof Channel Request Log Error: {e}")
+            logger.error(f"Log Channel Post Error: {e}")
 
-    # 2. 🎛️ ለአድሚን የሚላክ እጅግ የተሟላ ዝርዝር (ID, Username, Referral Metrics)
+    # 2. ለአድሚን የሚላክ መረጃ
     direct_ref, tier2_ref = await DataEngine.get_referral_metrics(uid)
     alias_str = f"@{user['username']}" if user["username"] else "None"
     admin_txt = (
@@ -588,14 +573,13 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 <b>Holder Name:</b> {s['validated_title']}\n"
         f"🆔 <b>User ID:</b> <code>{uid}</code>\n"
-        f"🏷 <b>Username:</b> {alias_str}\n"
+        f"标签 <b>Username:</b> {alias_str}\n"
         f"📲 <b>Phone:</b> <code>{s['validated_phone']}</code>\n"
         f"💰 <b>Amount:</b> <b>{s['validated_volume']:.2f} Birr</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 <b>NETWORK INTEGRITY REPORT:</b>\n"
-        f"• Direct Referrals (የጋበዛቸው): <b>{direct_ref} ሰዎችን</b>\n"
-        f"• Tier-2 Network Activity (የእነሱ ተጋባዦች ደግሞ የጋበዟቸው): <b>{tier2_ref} ሰዎችን</b>\n"
-        f"⚠️ <i>Check tier-2 activity to spot fake multi-accounters easily!</i>"
+        f"• Direct Referrals: <b>{direct_ref} ሰዎችን</b>\n"
+        f"• Tier-2 Network Activity: <b>{tier2_ref} ሰዎችን</b>"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Approve (ይለቀቅ)",  callback_data=f"adm_payout_ap_{tid}"),
@@ -603,7 +587,7 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     ]])
     for aid in ADMIN_IDS:
         try: await bot.send_message(aid, admin_txt, reply_markup=markup)
-        except Exception as e: logger.error(f"Admin notify failed {aid}: {e}")
+        except Exception: pass
 
     await callback.message.edit_text("📨 <b>Withdrawal Submitted!</b> Processing within 2-24 hours.", reply_markup=generate_dashboard_matrix(uid))
 
@@ -616,26 +600,23 @@ async def process_admin_approval(callback: CallbackQuery):
 
     await DataEngine.update_withdrawal_status(tid, "approved", ticket["channel_post_id"])
     
-    # 3. 🎉 AFTER APPROVED -> ወደ LOG/PROOF ቻናል የክፍያ ማረጋገጫ ፎቶ መላክ
+    # 3. ✅ ክፍያው ሲፈቀድ (Approved) በድሮው ፖስት ላይ REPLY አድርጎ ፎቶ መላክ
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try:
+            txt = (
+                f"✅ <b>PAYOUT SETTLEMENT COMPLETED SUCCESSFULLY</b>\n\n"
+                f"👤 <b>Recipient:</b> {ticket['full_name']}\n"
+                f"💰 <b>Amount:</b> ETB {ticket['amount']:.2f}\n"
+                f"🚀 <b>Operational Registry:</b> Verified Success ✅"
+            )
             await bot.send_photo(
-                chat_id=PAYMENT_LOG_CHANNEL,
-                photo=TELEBIRR_PROOF_IMAGE,
-                caption=(
-                    f"✅ <b>WITHDRAWAL APPROVED / ክፍያ ተፈጽሟል</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"👤 <b>Name:</b> {ticket['full_name']}\n"
-                    f"💰 <b>Paid Amount:</b> <code>{ticket['amount']:.2f} ETB</code>\n"
-                    f"📲 <b>Gateway:</b> Telebirr Instant\n"
-                    f"🚀 <b>Status:</b> Success/Paid ✅\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🙏 Thank you for using our Referral Bot Network!"
-                ),
+                chat_id=PAYMENT_LOG_CHANNEL, 
+                photo=TELEBIRR_PROOF_IMAGE, 
+                caption=txt,
                 reply_to_message_id=ticket["channel_post_id"]
             )
         except Exception as e:
-            logger.error(f"Proof Channel Photo Update Error: {e}")
+            logger.error(f"Proof Channel Payout Update Error: {e}")
             
     try: await bot.send_message(ticket["user_id"], f"🎉 Your cashout of {ticket['amount']:.2f} Birr has been successfully approved and sent via Telebirr!")
     except Exception: pass
@@ -647,8 +628,20 @@ async def process_admin_rejection(callback: CallbackQuery):
     tid    = int(callback.data.split("_")[3])
     ticket = await DataEngine.get_withdrawal(tid)
     if not ticket or ticket["status"] != "pending": return await callback.answer("Already evaluated.")
-    await DataEngine.update_withdrawal_status(tid, "rejected")
+    
+    await DataEngine.update_withdrawal_status(tid, "rejected", ticket["channel_post_id"])
     await DataEngine.add_balance(ticket["user_id"], ticket["amount"])
+    
+    # ውድቅ ከተደረገ በድሮው ፖስት ላይ Reply አድርጎ ውድቅ መደረጉን ይገልጻል
+    if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
+        try: 
+            await bot.send_message(
+                chat_id=PAYMENT_LOG_CHANNEL,
+                text=f"❌ <b>REQUEST DENIED / REJECTED</b>\n\n👤 {ticket['full_name']} — Request for ETB {ticket['amount']:.2f} was cancelled by admin.",
+                reply_to_message_id=ticket["channel_post_id"]
+            )
+        except Exception: pass
+
     try: await bot.send_message(ticket["user_id"], "❌ Withdrawal request rejected. Assets have been returned to your balance.")
     except Exception: pass
     await callback.message.edit_text(callback.message.text + "\n\n❌ Ticket Rejected.")
@@ -690,7 +683,7 @@ async def process_add_channel_finalize(message: Message, state: FSMContext):
 async def process_add_noadmin_start(callback: CallbackQuery, state: FSMContext):
     if not evaluate_admin_access(callback.from_user.id): return
     await state.set_state(AdminConsoleWorkflow.append_noadmin_link)
-    await callback.message.edit_text("🟡 <b>Fake Force Join (ማስመሰያ - No Admin Required)</b>\n\nእዚህ ላይ የምታስገባው ቻናል ላይ ቦቱ አድሚን መሆን አይጠበቅበትም፤ ነገር ግን ለተጠቃሚው ልክ እንደ ሌሎቹ አስገዳጅ ቻናሎች ተቀላቅሎ እንዲታይ ይደረጋል።\n\nየቻናሉን <b>ሊንክ</b> አስገባ (e.g. https://t.me/xxxx):", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("🟡 <b>Fake Force Join (ማስመሰያ - No Admin Required)</b>\n\nየቻናሉን <b>ሊንክ</b> አስገባ (e.g. https://t.me/xxxx):", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.append_noadmin_link)
 async def process_noadmin_link(message: Message, state: FSMContext):
@@ -704,7 +697,7 @@ async def process_noadmin_title(message: Message, state: FSMContext):
     await state.clear()
     fake_key = "fake_" + hashlib.md5(s["na_link"].encode()).hexdigest()[:8]
     await DataEngine.add_force_channel(channel_id=fake_key, channel_name=message.text.strip(), invite_link=s["na_link"], bot_added=1)
-    await message.answer(f"✅ <b>Fake ማስመሰያ ቻናል ተጨምሯል!</b>\n📌 {message.text.strip()}\n⚠️ ቦቱ አድሚን መሆን ሳይጠበቅበት ከእውነተኛዎቹ ጋር ተቀላቅሎ ይሰራል!", reply_markup=generate_admin_dashboard())
+    await message.answer(f"✅ <b>Fake ማስመሰያ ቻናል ተጨምሯል!</b>\n📌 {message.text.strip()}", reply_markup=generate_admin_dashboard())
 
 @core_router.callback_query(F.data == "adm_cmd_list_channels")
 async def process_list_channels(callback: CallbackQuery):
@@ -713,7 +706,7 @@ async def process_list_channels(callback: CallbackQuery):
     if not channels: return await callback.message.edit_text("📭 No channels configured.", reply_markup=generate_fallback_navigation("ui_admin_core"))
     lines = []
     for ch in channels:
-        mode = "🟡 Fake (No-Admin Check)" if ch["bot_added"] else "🔴 Real (Admin Check)"
+        mode = "🟡 Fake" if ch["bot_added"] else "🔴 Real"
         lines.append(f"{mode} — <b>{ch['channel_name']}</b>\n🔗 {ch['invite_link']}")
     await callback.message.edit_text(f"📋 <b>Force Channels Inventory ({len(channels)})</b>\n\n" + "\n\n".join(lines), reply_markup=generate_fallback_navigation("ui_admin_core"))
 
@@ -861,7 +854,7 @@ async def process_pending_inventory(callback: CallbackQuery):
     if not evaluate_admin_access(callback.from_user.id): return
     pending = await DataEngine.get_pending_withdrawals()
     if not pending: return await callback.message.edit_text("📭 No pending withdrawals.", reply_markup=generate_fallback_navigation("ui_admin_core"))
-    lines = [f"• <b>#{t['id']}</b> — {t['full_name']} — <code>{t['amount']:.2f} ETB</code> — <code>{t['phone']}</code>" for t in pending]
+    lines = [f"• <b>#{t['id']}</b> — {t['full_name']} — <code>{t['amount']:.2f} ETB</code>" for t in pending]
     await callback.message.edit_text(f"📥 <b>Pending Withdrawal Inventory ({len(pending)})</b>\n\n" + "\n".join(lines), reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -906,12 +899,10 @@ async def execute_verification(request: Request):
 
     fingerprint = data.get("fingerprint", "").strip()
     
-    # 🛡️ 1. የፊንገርፕሪንት ባዶ መሆን (ክፉኛ የተዘጋጀ ቦት ሙከራ ከሆነ)
     if not fingerprint or fingerprint in ("undefined", "null", ""):
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
         await DataEngine.ban_user(uid, 1)
         
-        # ⚠️ ማሻሻያ፡ የቦቱን የቀድሞ ሪፕላይ መልእክት ሰርዞ ምክንያቱን በሚኒ አፑ ላይ መናገር
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
@@ -924,12 +915,10 @@ async def execute_verification(request: Request):
     is_clone = await DataEngine.find_duplicate(client_ip, fingerprint, uid)
     is_vpn   = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
 
-    # 🛡️ 2. ቪፒኤን ወይም ክሎን አካውንት ከተገኘ
     if is_clone or is_vpn:
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
         await DataEngine.ban_user(uid, 1)
         
-        # ⚠️ ማሻሻያ፡ የቦቱን ሪፕላይ ሰርዞ ምክንያቱን ለየብቻ መናገር
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
@@ -937,10 +926,11 @@ async def execute_verification(request: Request):
         reason_type = "vpn" if is_vpn else "clone"
         return JSONResponse({"status": "blocked", "reason": reason_type})
 
-    # ንጹህ ተጠቃሚ ከሆነ የቦቱን አሮጌ ማረጋገጫ መጠየቂያ መልእክት ማጥፋት
     if msg_id > 0:
-        try: await bot.delete_message(chat_id=uid, message_id=msg_id)
-    except Exception: pass
+        try:
+            await bot.delete_message(chat_id=uid, message_id=msg_id)
+        except Exception:
+            pass
 
     await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""), ref_id or None)
     await DataEngine.save_verification(uid, client_ip, data.get("ua", ""), fingerprint)
