@@ -1,7 +1,7 @@
 """
 ================================================================================
                     TELEGRAM ADVANCED REFERRAL BOT SYSTEM
-         [ Upgraded Production Engine - With Fake Gate & Advanced Logs ]
+         [ Upgraded Production Engine - With Safe VPN Retries ]
 ================================================================================
 """
 
@@ -184,20 +184,6 @@ class DataEngine:
             return (await cur.fetchone()) is not None
 
     @staticmethod
-    async def find_duplicate(ip: str, fingerprint: str, exclude_user: int):
-        if not fingerprint or fingerprint in ("undefined", "null", ""):
-            return "empty_fingerprint"
-        async with aiosqlite.connect(DB_PATH) as db:
-            db.row_factory = aiosqlite.Row
-            cur = await db.execute(
-                "SELECT user_id FROM verifications "
-                "WHERE (ip_address = ? OR fingerprint = ?) AND user_id != ? LIMIT 1",
-                (ip, fingerprint, exclude_user),
-            )
-            row = await cur.fetchone()
-            return row["user_id"] if row else None
-
-    @staticmethod
     async def save_verification(user_id: int, ip: str, ua: str, fingerprint: str):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
@@ -270,7 +256,7 @@ class DataEngine:
             await db.commit()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FSM & ROUTER SETUP
+# WORKFLOW STATES
 # ─────────────────────────────────────────────────────────────────────────────
 class UserWithdrawalWorkflow(StatesGroup):
     select_payout_gateway = State()
@@ -294,8 +280,8 @@ class AdminConsoleWorkflow(StatesGroup):
     banish_individual_id     = State()
     pardon_individual_id     = State()
 
-bot        = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp         = Dispatcher(storage=MemoryStorage())
+bot         = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+dp          = Dispatcher(storage=MemoryStorage())
 core_router = Router()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,7 +464,7 @@ async def process_link_generation(callback: CallbackQuery):
     await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WITHDRAWAL CORE LOGIC & PROOF HANDLERS (REPLY MODE)
+# WITHDRAWAL CORE LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
 async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
@@ -546,7 +532,7 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     await DataEngine.add_balance(uid, -s["validated_volume"])
     await state.clear()
 
-    # 1. ⏳ ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST ፖስት ማድረግ (የሞላውን ስም s['validated_title'] ይጠቀማል)
+    # 1. ⏳ ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST መለጠፍ
     post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
@@ -573,7 +559,7 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 <b>Holder Name:</b> {s['validated_title']}\n"
         f"🆔 <b>User ID:</b> <code>{uid}</code>\n"
-        f"标签 <b>Username:</b> {alias_str}\n"
+        f"👤 <b>Username:</b> {alias_str}\n"
         f"📲 <b>Phone:</b> <code>{s['validated_phone']}</code>\n"
         f"💰 <b>Amount:</b> <b>{s['validated_volume']:.2f} Birr</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -600,7 +586,7 @@ async def process_admin_approval(callback: CallbackQuery):
 
     await DataEngine.update_withdrawal_status(tid, "approved", ticket["channel_post_id"])
     
-    # 3. ✅ ክፍያው ሲፈቀድ (Approved) በድሮው ፖስት ላይ REPLY አድርጎ ፎቶ መላክ (ተመሳሳይ የሞላውን ስም ያሳያል)
+    # 3. ✅ ሲፈቀድ (Approved) በድሮው ፖስት ላይ REPLY አድርጎ ፎቶ መላክ (ተመሳሳይ ስም)
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try:
             txt = (
@@ -632,7 +618,7 @@ async def process_admin_rejection(callback: CallbackQuery):
     await DataEngine.update_withdrawal_status(tid, "rejected", ticket["channel_post_id"])
     await DataEngine.add_balance(ticket["user_id"], ticket["amount"])
     
-    # ውድቅ ከተደረገ በድሮው ፖስት ላይ Reply አድርጎ ውድቅ መደረጉን ይገልጻል (ተመሳሳይ የሞላውን ስም ያሳያል)
+    # ውድቅ ከተደረገ በድሮው ፖስት ላይ Reply አድርጎ ማሳወቅ (ተመሳሳይ ስም)
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try: 
             await bot.send_message(
@@ -858,7 +844,7 @@ async def process_pending_inventory(callback: CallbackQuery):
     await callback.message.edit_text(f"📥 <b>Pending Withdrawal Inventory ({len(pending)})</b>\n\n" + "\n".join(lines), reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FASTAPI BACKEND APP & MINI APP VERIFICATION HANDLERS (FINGERPRINT THEN IP)
+# FASTAPI APP & ANTI-FRAUD VERIFICATION CORE (WITH RETRY SAFE VPN)
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def application_lifespan(app: FastAPI):
@@ -904,11 +890,11 @@ async def execute_verification(request: Request):
     # ─────────────────────────────────────────────────────────────────────────
     if not fingerprint or fingerprint in ("undefined", "null", ""):
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1)
+        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
-        return JSONResponse({"status": "blocked", "reason": "Security Integrity Fault (Invalid Device Fingerprint)"})
+        return JSONResponse({"status": "blocked", "reason": "Security Integrity Fault"})
 
     # ይህ መሳሪያ (Fingerprint) ቀድሞ በሌላ የቴሌግራም ID ተመዝግቦ እንደሆነ ያያል
     async with aiosqlite.connect(DB_PATH) as db:
@@ -921,7 +907,7 @@ async def execute_verification(request: Request):
 
     if duplicate_device:
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1)
+        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
@@ -934,6 +920,7 @@ async def execute_verification(request: Request):
     if client_ip: client_ip = client_ip.split(",")[0].strip()
     else: client_ip = request.client.host if request.client else "unknown"
 
+    # ያው IP በሌላ አካውንት ጥቅም ላይ ውሏል? (IP Clone Check)
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT user_id FROM verifications WHERE ip_address = ? AND user_id != ? LIMIT 1",
@@ -941,16 +928,21 @@ async def execute_verification(request: Request):
         )
         duplicate_ip = await cur.fetchone()
 
-    is_vpn = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
-
-    if duplicate_ip or is_vpn:
+    if duplicate_ip:
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1)
+        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
-        reason_type = "vpn" if is_vpn else "clone"
-        return JSONResponse({"status": "blocked", "reason": reason_type})
+        return JSONResponse({"status": "blocked", "reason": "clone"})
+
+    # 🛡️ የ VPN ፍተሻ (SAFE RETRY MODE — USER አይታገድም!)
+    is_vpn = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
+
+    if is_vpn:
+        # 💡 እዚህ ጋር ተጠቃሚው አይታገድም! ልክ እንደ መደበኛ ስህተት "vpn" ተብሎ ይመለሳል።
+        # VPN አጥፍቶ በድጋሚ ገጹን ሪፍሬሽ ሲያደርግ ማለፍ ይችላል።
+        return JSONResponse({"status": "blocked", "reason": "vpn"})
 
     # ─────────────────────────────────────────────────────────────────────────
     # 🎉 SUCCESS SETTLEMENT
