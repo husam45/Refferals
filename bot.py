@@ -52,7 +52,6 @@ WEBAPP_URL           = os.getenv("WEBAPP_URL", "http://localhost:8000").rstrip("
 PROXYCHECK_API_KEY   = os.getenv("PROXYCHECK_API_KEY", "")
 DB_PATH              = "referral_bot.db"
 
-# የቴሌብር ክፍያ ማረጋገጫ ፎቶ File ID
 TELEBIRR_PROOF_IMAGE = "AgACAgQAAxkBAAOYai38ooud5iofBd3aDGuCiX273t8AAj4PaxsYl3BR78MpfA_cDpkBAAMCAAN4AAM8BA"
 
 if not WEBAPP_URL.startswith(("http://", "https://")):
@@ -285,36 +284,33 @@ dp          = Dispatcher(storage=MemoryStorage())
 core_router = Router()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FORCE JOIN LOGIC
+# FORCE JOIN LOGIC (UPDATED - NO ADMIN REQUIREMENT FOR FAKE)
 # ─────────────────────────────────────────────────────────────────────────────
 async def inspect_compulsory_memberships(user_id: int) -> list:
     channels = await DataEngine.get_force_channels()
     unjoined = []
     for ch in channels:
+        # 🟡 ፌክ ቻናል ከሆነ ሰርቨር ሳይጠይቅ በቀጥታ ለተጠቃሚው እንዲታይ ያደርገዋል
         if ch["bot_added"] == 1:
+            unjoined.append(dict(ch))
             continue
-        else:
-            try:
-                m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
-                if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
-                    unjoined.append(dict(ch))
-            except Exception:
+        # 🔴 እውነተኛ ቻናል ከሆነ ብቻ ቦቱ አድሚን መሆኑን ያረጋግጣል
+        try:
+            m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
+            if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
                 unjoined.append(dict(ch))
+        except Exception:
+            unjoined.append(dict(ch))
     return unjoined
 
 async def enforce_membership_gate(event, user_id: int) -> bool:
     unjoined = await inspect_compulsory_memberships(user_id)
-    all_db_channels = await DataEngine.get_force_channels()
-    
     if not unjoined:
         return True
 
     buttons = []
-    for ch in all_db_channels:
-        if ch["bot_added"] == 0 and ch in unjoined:
-            buttons.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch["invite_link"])])
-        elif ch["bot_added"] == 1:
-            buttons.append([InlineKeyboardButton(text=f"➕ {ch['channel_name']}", url=ch["invite_link"])])
+    for ch in unjoined:
+        buttons.append([InlineKeyboardButton(text=f"➕ Join: {ch['channel_name']}", url=ch["invite_link"])])
 
     buttons.append([InlineKeyboardButton(text="✅ Joined — Verify Status", callback_data="ui_revalidate_channels")])
     txt = "⚠️ <b>Action Required:</b> Please join our mandatory channel(s) to continue / እባክዎ ቻናላችንን ይቀላቀሉ:"
@@ -383,6 +379,7 @@ def generate_admin_dashboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📥 Pending Withdrawals",  callback_data="adm_cmd_pending_tickets"), InlineKeyboardButton(text="📢 Broadcast Message",    callback_data="adm_cmd_broadcast")],
         [InlineKeyboardButton(text="🔍 Search User",   callback_data="adm_cmd_search")],
         [InlineKeyboardButton(text="🚫 Ban User",    callback_data="adm_cmd_ban"), InlineKeyboardButton(text="✅ Unban User",  callback_data="adm_cmd_unban")],
+        [InlineKeyboardButton(text="🛑 STOP BOT ENGINE", callback_data="adm_stop_bot_confirm1")], # አዲሱ ማቆሚያ በተን
         [InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="ui_return_home")],
     ])
 
@@ -414,11 +411,23 @@ async def process_start_command(message: Message, state: FSMContext):
     sent = await message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Next Step:</b> Verify identity via Mini App:", reply_markup=generate_verification_widget(uid, ref, 0))
     await sent.edit_reply_markup(reply_markup=generate_verification_widget(uid, ref, sent.message_id))
 
+# 🔴 እውነተኛ ቻናሎችን ብቻ ቼክ የሚያደርግ ፈንክሽን
 @core_router.callback_query(F.data == "ui_revalidate_channels")
 async def process_channel_revalidation(callback: CallbackQuery, state: FSMContext):
     uid = callback.from_user.id
-    unjoined = await inspect_compulsory_memberships(uid)
-    if unjoined:
+    channels = await DataEngine.get_force_channels()
+    
+    real_unjoined = []
+    for ch in channels:
+        if ch["bot_added"] == 0:  # እውነተኛ ቻናል ብቻ ነው ቴሌግራም ላይ ቼክ የሚደረገው
+            try:
+                m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=uid)
+                if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
+                    real_unjoined.append(ch)
+            except Exception:
+                real_unjoined.append(ch)
+                
+    if real_unjoined:
         return await callback.answer("❌ Verification failed. Please join all the assigned channels first.", show_alert=True)
     
     try: await callback.message.delete()
@@ -464,7 +473,7 @@ async def process_link_generation(callback: CallbackQuery):
     await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WITHDRAWAL CORE LOGIC (HIGH TRAFFIC SAFELOG SYSTEM)
+# WITHDRAWAL CORE LOGIC
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
 async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
@@ -528,18 +537,15 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     if user["balance"] < s["validated_volume"]:
         return await callback.answer("❌ Insufficient funds.", show_alert=True)
 
-    # 💎 1. ግሊች እንዳይፈጠር መጀመሪያ ዳታቤዝ ላይ ሂሳቡን ቀንሰህ መዝግብ
     tid = await DataEngine.create_withdrawal(uid, s["validated_volume"], s["validated_title"], s["validated_phone"])
     await DataEngine.add_balance(uid, -s["validated_volume"])
     await state.clear()
 
-    # 🚀 2. የቦቱን ሊንክ በ Inline Keyboard 'START' በሚል ርዕስ ማዘጋጀት
     me = await bot.get_me()
     bot_link_market = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="START 🚀", url=f"https://t.me/{me.username}?start=payout")
     ]])
 
-    # ⏳ 3. ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST መለጠፍ (ከነ START በተን)
     post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
@@ -558,7 +564,6 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.error(f"Log Channel Post Error: {e}")
 
-    # 📊 4. ለአድሚኖች የሚላክ የቁጥጥር መልእክት
     direct_ref, tier2_ref = await DataEngine.get_referral_metrics(uid)
     alias_str = f"@{user['username']}" if user["username"] else "None"
     admin_txt = (
@@ -722,6 +727,48 @@ async def process_rm_channel_action(callback: CallbackQuery):
         await db.commit()
     await callback.message.edit_text("✅ Channel configuration removed.", reply_markup=generate_admin_dashboard())
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🛑 STOP BOT SYSTEM WITH DOUBLE CONFIRMATION (NEW)
+# ─────────────────────────────────────────────────────────────────────────────
+@core_router.callback_query(F.data == "adm_stop_bot_confirm1")
+async def stop_bot_first_confirmation(callback: CallbackQuery):
+    if not evaluate_admin_access(callback.from_user.id): return
+    # ⚠️ ደረጃ 1፡ የመጀመሪያ ማስጠንቀቂያ
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ ኃላፊነቱን እወስዳለሁ - ቀጥል", callback_data="adm_stop_bot_confirm2")],
+        [InlineKeyboardButton(text="❌ አቁም/ተመለስ", callback_data="ui_admin_core")]
+    ])
+    await callback.message.edit_text(
+        "🚨 <b>FIRST WARNING / የመጀመሪያ ደረጃ ማስጠንቀቂያ!</b>\n\n"
+        "ቦቱን ማቆም (Stop) ከፈለጉ እርግጠኛ ነዎት? ይህ ትዕዛዝ ሲፈጸም ቦቱ ከቴሌግራም ሰርቨር ጋር ያለው ግንኙነት ይቋረጣል!",
+        reply_markup=markup
+    )
+
+@core_router.callback_query(F.data == "adm_stop_bot_confirm2")
+async def stop_bot_final_confirmation(callback: CallbackQuery):
+    if not evaluate_admin_access(callback.from_user.id): return
+    # 🔥 ደረጃ 2፡ የመጨረሻ ማረጋገጫ (ቀይ በተን)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛑 አሁኑኑ ቦቱ ይጥፋ! (SHUTDOWN)", callback_data="adm_stop_bot_execute")],
+        [InlineKeyboardButton(text="❌ ተመለስ", callback_data="ui_admin_core")]
+    ])
+    await callback.message.edit_text(
+        "🛑 <b>FINAL CONFIRMATION / የመጨረሻ ማረጋገጫ!</b>\n\n"
+        "ይህንን በተን ሲጫኑ የቦቱ የፖሊንግ ሲስተም (Polling Vector) ይዘጋል። ቦቱን በድጋሚ ለማስጀመር ሰርቨሩ ላይ መግባት ይኖርብዎታል!",
+        reply_markup=markup
+    )
+
+@core_router.callback_query(F.data == "adm_stop_bot_execute")
+async def execute_bot_shutdown(callback: CallbackQuery):
+    if not evaluate_admin_access(callback.from_user.id): return
+    await callback.message.edit_text("💀 <b>Bot engine system is shutting down... Goodbye!</b>")
+    logger.critical("Admin requested manual engine shutdown. Terminating process loops.")
+    # 💥 ፕሮሰሱን ሙሉ በሙሉ ያቆመዋል
+    sys.exit(0)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONTINUED ADMIN LOGIC
+# ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "adm_cmd_edit_bal")
 async def process_edit_balance_start(callback: CallbackQuery, state: FSMContext):
     if not evaluate_admin_access(callback.from_user.id): return
@@ -890,7 +937,6 @@ async def execute_verification(request: Request):
 
     fingerprint = data.get("fingerprint", "").strip()
     
-    # 🛑 ፈተሻ 1: Fingerprint Check (Multi-Account ለመያዝ)
     if not fingerprint or fingerprint in ("undefined", "null", ""):
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
         await DataEngine.ban_user(uid, 1)
@@ -915,7 +961,6 @@ async def execute_verification(request: Request):
             except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "clone"})
 
-    # 🌐 ፈተሻ 2: IP Address Check
     client_ip = request.headers.get("X-Forwarded-For")
     if client_ip: client_ip = client_ip.split(",")[0].strip()
     else: client_ip = request.client.host if request.client else "unknown"
@@ -935,13 +980,10 @@ async def execute_verification(request: Request):
             except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "clone"})
 
-    # 🛡️ የ VPN ፍተሻ (SAFE RETRY MODE — ተጠቃሚው ሳይታገድ በ "vpn" ሪሰን ይመለሳል)
     is_vpn = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
-
     if is_vpn:
         return JSONResponse({"status": "blocked", "reason": "vpn"})
 
-    # 🎉 SUCCESS SETTLEMENT
     if msg_id > 0:
         try: await bot.delete_message(chat_id=uid, message_id=msg_id)
         except Exception: pass
