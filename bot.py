@@ -1,7 +1,7 @@
 """
 ================================================================================
                     TELEGRAM ADVANCED REFERRAL BOT SYSTEM
-         [ Upgraded Production Engine - With Safe VPN Retries ]
+         [ Upgraded Production Engine - High Traffic & Safe Logs ]
 ================================================================================
 """
 
@@ -402,7 +402,7 @@ async def process_start_command(message: Message, state: FSMContext):
 
     acc = await DataEngine.get_user(uid)
     if acc and acc["is_banned"]:
-        return await message.answer("🚫 <b>Access Denied:</b> Your profile has been blacklisted.")
+        return await message.answer("🚫 <b>Banned:</b> Your profile has been blacklisted.")
 
     if not await enforce_membership_gate(message, uid):
         if ref: await state.update_data(stashed_referrer_id=ref)
@@ -464,7 +464,7 @@ async def process_link_generation(callback: CallbackQuery):
     await callback.message.edit_text(f"🔗 <b>Your Invite Link:</b>\n\n<code>https://t.me/{me.username}?start={callback.from_user.id}</code>", reply_markup=generate_fallback_navigation())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WITHDRAWAL CORE LOGIC
+# WITHDRAWAL CORE LOGIC (HIGH TRAFFIC SAFELOG SYSTEM)
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "ui_initiate_withdrawal")
 async def process_withdrawal_start(callback: CallbackQuery, state: FSMContext):
@@ -528,11 +528,18 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
     if user["balance"] < s["validated_volume"]:
         return await callback.answer("❌ Insufficient funds.", show_alert=True)
 
+    # 💎 1. ግሊች እንዳይፈጠር መጀመሪያ ዳታቤዝ ላይ ሂሳቡን ቀንሰህ መዝግብ
     tid = await DataEngine.create_withdrawal(uid, s["validated_volume"], s["validated_title"], s["validated_phone"])
     await DataEngine.add_balance(uid, -s["validated_volume"])
     await state.clear()
 
-    # 1. ⏳ ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST መለጠፍ
+    # 🚀 2. የቦቱን ሊንክ በ Inline Keyboard 'START' በሚል ርዕስ ማዘጋጀት
+    me = await bot.get_me()
+    bot_link_market = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="START 🚀", url=f"https://t.me/{me.username}?start=payout")
+    ]])
+
+    # ⏳ 3. ሎግ ቻናል ላይ NEW WITHDRAWAL REQUEST መለጠፍ (ከነ START በተን)
     post_id = 0
     if PAYMENT_LOG_CHANNEL:
         try:
@@ -545,13 +552,13 @@ async def process_payout_dispatch(callback: CallbackQuery, state: FSMContext):
                 f"📊 <b>Status:</b> Pending Verification ⏳\n\n"
                 f"⏰ <b>Timestamp:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            receipt = await bot.send_message(PAYMENT_LOG_CHANNEL, txt)
+            receipt = await bot.send_message(PAYMENT_LOG_CHANNEL, txt, reply_markup=bot_link_market)
             post_id = receipt.message_id
             await DataEngine.update_withdrawal_status(tid, "pending", post_id)
         except Exception as e:
             logger.error(f"Log Channel Post Error: {e}")
 
-    # 2. ለአድሚን የሚላክ መረጃ
+    # 📊 4. ለአድሚኖች የሚላክ የቁጥጥር መልእክት
     direct_ref, tier2_ref = await DataEngine.get_referral_metrics(uid)
     alias_str = f"@{user['username']}" if user["username"] else "None"
     admin_txt = (
@@ -586,7 +593,6 @@ async def process_admin_approval(callback: CallbackQuery):
 
     await DataEngine.update_withdrawal_status(tid, "approved", ticket["channel_post_id"])
     
-    # 3. ✅ ሲፈቀድ (Approved) በድሮው ፖስት ላይ REPLY አድርጎ ፎቶ መላክ (ተመሳሳይ ስም)
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try:
             txt = (
@@ -618,7 +624,6 @@ async def process_admin_rejection(callback: CallbackQuery):
     await DataEngine.update_withdrawal_status(tid, "rejected", ticket["channel_post_id"])
     await DataEngine.add_balance(ticket["user_id"], ticket["amount"])
     
-    # ውድቅ ከተደረገ በድሮው ፖስት ላይ Reply አድርጎ ማሳወቅ (ተመሳሳይ ስም)
     if PAYMENT_LOG_CHANNEL and ticket["channel_post_id"]:
         try: 
             await bot.send_message(
@@ -844,7 +849,7 @@ async def process_pending_inventory(callback: CallbackQuery):
     await callback.message.edit_text(f"📥 <b>Pending Withdrawal Inventory ({len(pending)})</b>\n\n" + "\n".join(lines), reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FASTAPI APP & ANTI-FRAUD VERIFICATION CORE (WITH RETRY SAFE VPN)
+# FASTAPI APP & ANTI-FRAUD VERIFICATION CORE
 # ─────────────────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def application_lifespan(app: FastAPI):
@@ -885,18 +890,15 @@ async def execute_verification(request: Request):
 
     fingerprint = data.get("fingerprint", "").strip()
     
-    # ─────────────────────────────────────────────────────────────────────────
-    # 🛑 ፈተሻ 1: የመሳሪያ መለያ (FINGERPRINT CHECK) — Multi-Account ለመያዝ
-    # ─────────────────────────────────────────────────────────────────────────
+    # 🛑 ፈተሻ 1: Fingerprint Check (Multi-Account ለመያዝ)
     if not fingerprint or fingerprint in ("undefined", "null", ""):
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
+        await DataEngine.ban_user(uid, 1)
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
-        return JSONResponse({"status": "blocked", "reason": "Security Integrity Fault"})
+        return JSONResponse({"status": "blocked", "reason": "clone"})
 
-    # ይህ መሳሪያ (Fingerprint) ቀድሞ በሌላ የቴሌግራም ID ተመዝግቦ እንደሆነ ያያል
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -907,20 +909,17 @@ async def execute_verification(request: Request):
 
     if duplicate_device:
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
+        await DataEngine.ban_user(uid, 1)
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "clone"})
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # 🌐 ፈተሻ 2: የኔትወርክ አድራሻ (IP ADDRESS & VPN CHECK)
-    # ─────────────────────────────────────────────────────────────────────────
+    # 🌐 ፈተሻ 2: IP Address Check
     client_ip = request.headers.get("X-Forwarded-For")
     if client_ip: client_ip = client_ip.split(",")[0].strip()
     else: client_ip = request.client.host if request.client else "unknown"
 
-    # ያው IP በሌላ አካውንት ጥቅም ላይ ውሏል? (IP Clone Check)
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT user_id FROM verifications WHERE ip_address = ? AND user_id != ? LIMIT 1",
@@ -930,23 +929,19 @@ async def execute_verification(request: Request):
 
     if duplicate_ip:
         await DataEngine.create_user(uid, tg_user.get("username", ""), tg_user.get("first_name", ""))
-        await DataEngine.ban_user(uid, 1) # Fraud -> Permanent Ban
+        await DataEngine.ban_user(uid, 1)
         if msg_id > 0:
             try: await bot.delete_message(chat_id=uid, message_id=msg_id)
             except Exception: pass
         return JSONResponse({"status": "blocked", "reason": "clone"})
 
-    # 🛡️ የ VPN ፍተሻ (SAFE RETRY MODE — USER አይታገድም!)
+    # 🛡️ የ VPN ፍተሻ (SAFE RETRY MODE — ተጠቃሚው ሳይታገድ በ "vpn" ሪሰን ይመለሳል)
     is_vpn = data.get("isVpn") or await execute_network_vpn_lookup(client_ip)
 
     if is_vpn:
-        # 💡 እዚህ ጋር ተጠቃሚው አይታገድም! ልክ እንደ መደበኛ ስህተት "vpn" ተብሎ ይመለሳል።
-        # VPN አጥፍቶ በድጋሚ ገጹን ሪፍሬሽ ሲያደርግ ማለፍ ይችላል።
         return JSONResponse({"status": "blocked", "reason": "vpn"})
 
-    # ─────────────────────────────────────────────────────────────────────────
     # 🎉 SUCCESS SETTLEMENT
-    # ─────────────────────────────────────────────────────────────────────────
     if msg_id > 0:
         try: await bot.delete_message(chat_id=uid, message_id=msg_id)
         except Exception: pass
