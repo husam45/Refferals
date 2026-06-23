@@ -399,30 +399,171 @@ async function getIP(){
   }
 }
 
-/* ── Step 2: VPN / Proxy check ───────────────── */
+/* ── WebRTC local IP leak detector ───────────── */
+function getWebRTCIPs(){
+  return new Promise(resolve => {
+    const ips = new Set();
+    let done  = false;
+    const finish = () => { done = true; resolve([...ips]); };
+    setTimeout(finish, 2500); // max wait
+
+    try{
+      const pc = new RTCPeerConnection({ iceServers:[{urls:"stun:stun.l.google.com:19302"}] });
+      pc.createDataChannel("");
+      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(finish);
+      pc.onicecandidate = e => {
+        if(!e || !e.candidate){ if(!done) finish(); return; }
+        // extract IPs from candidate string
+        const regex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/g;
+        let m;
+        while((m = regex.exec(e.candidate.candidate)) !== null){
+          ips.add(m[1]);
+        }
+      };
+    }catch{ finish(); }
+  });
+}
+
+/* ── VPN IP range check ───────────────────────── */
+function isVpnLocalIP(ip){
+  // VPN tunnel adapters almost always assign these ranges
+  if(!ip) return false;
+  const parts = ip.split(".").map(Number);
+  const p0 = parts[0], p1 = parts[1];
+  // 10.0.0.0/8  → common VPN / tunnel
+  if(p0 === 10) return true;
+  // 172.16.0.0–172.31.0.0/12
+  if(p0 === 172 && p1 >= 16 && p1 <= 31) return true;
+  // NOT 192.168 — that's normal LAN, skip
+  return false;
+}
+
+/* ── Timezone vs IP country mismatch ─────────── */
+function getDeviceTimezone(){
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+}
+
+// timezone prefix → rough continent/region
+function tzRegion(tz){
+  if(!tz) return "";
+  const t = tz.toLowerCase();
+  if(t.startsWith("africa"))  return "AF";
+  if(t.startsWith("america")) return "AM";
+  if(t.startsWith("asia"))    return "AS";
+  if(t.startsWith("europe"))  return "EU";
+  if(t.startsWith("pacific")) return "PA";
+  if(t.startsWith("atlantic"))return "AT";
+  if(t.startsWith("indian"))  return "IN";
+  if(t.startsWith("australia") || t.startsWith("pacific/auckland")) return "OC";
+  return "";
+}
+
+/* ── Step 2: VPN / Proxy — multi-signal ──────── */
 async function checkVPN(ip){
-  stepActivate(2); setBar(35);
-  if(ip === "unknown"){
-    stepOk(2, "Skipped (no IP)"); setBar(50);
-    return false;
-  }
+  stepActivate(2); setBar(32);
+  document.getElementById("i2").textContent = "Running 3 checks…";
+
+  const signals   = [];
+  const flagged   = [];
+
+  /* ── Signal A: WebRTC local IP leak ── */
   try{
-    const r = await fetchTimeout(
-      `https://proxycheck.io/v2/${encodeURIComponent(ip)}?vpn=1&asn=1`,
-      {}, 5000
-    );
-    if(!r.ok) throw new Error("non-ok");
-    const d = await r.json();
-    const info = d[ip] || {};
-    const isVpn = info.proxy === "yes" || info.vpn === "yes" || info.type === "VPN";
-    if(isVpn){ stepErr(2, "VPN / Proxy detected!"); }
-    else      { stepOk(2, "Clean ✓"); }
-    setBar(50);
-    return isVpn;
+    const localIPs = await getWebRTCIPs();
+    const vpnLocal = localIPs.filter(isVpnLocalIP);
+    // also flag if NO local IP at all (some VPNs block WebRTC entirely — also suspicious)
+    const hasLocal = localIPs.some(i => i.startsWith("192.168.") || i.startsWith("10.") || i.startsWith("172."));
+    if(vpnLocal.length > 0){
+      signals.push(`WebRTC: ${vpnLocal[0]}`);
+      flagged.push("webrtc_vpn_ip");
+    } else if(localIPs.length === 0){
+      // WebRTC fully blocked — treated as weak signal only
+      signals.push("WebRTC: blocked");
+      // don't hard-flag, combine with others
+    } else {
+      signals.push("WebRTC: clean");
+    }
   }catch{
-    stepOk(2, "Check passed (timeout)"); setBar(50);
-    return false;
+    signals.push("WebRTC: unavailable");
   }
+
+  setBar(40);
+
+  /* ── Signal B: IP reputation (proxycheck.io) ── */
+  let ipRepVpn = false;
+  let ipCountry = "";
+  if(ip && ip !== "unknown"){
+    try{
+      const r = await fetchTimeout(
+        `https://proxycheck.io/v2/${encodeURIComponent(ip)}?vpn=1&asn=1`,
+        {}, 5000
+      );
+      if(r.ok){
+        const d    = await r.json();
+        const info = d[ip] || {};
+        ipRepVpn   = info.proxy === "yes" || info.vpn === "yes" ||
+                     info.type  === "VPN"  || info.type === "TOR" ||
+                     info.type  === "Hosting";
+        ipCountry  = (info.country || "").toUpperCase();
+        if(ipRepVpn){
+          signals.push(`IP rep: flagged (${info.type || "proxy"})`);
+          flagged.push("ip_reputation");
+        } else {
+          signals.push(`IP rep: clean (${ipCountry})`);
+        }
+      }
+    }catch{
+      signals.push("IP rep: timeout");
+    }
+  } else {
+    signals.push("IP rep: no IP");
+  }
+
+  setBar(47);
+
+  /* ── Signal C: Timezone vs IP country mismatch ── */
+  const tz        = getDeviceTimezone();
+  const devRegion = tzRegion(tz);
+
+  // map IP country → expected timezone region (rough)
+  const countryRegion = {
+    ET:"AF",DJ:"AF",ER:"AF",SO:"AF",KE:"AF",TZ:"AF",UG:"AF",SD:"AF",
+    NG:"AF",GH:"AF",CM:"AF",SN:"AF",ZA:"AF",EG:"AF",MA:"AF",TN:"AF",
+    US:"AM",CA:"AM",MX:"AM",BR:"AM",AR:"AM",CO:"AM",PE:"AM",CL:"AM",
+    GB:"EU",DE:"EU",FR:"EU",IT:"EU",ES:"EU",NL:"EU",SE:"EU",NO:"EU",
+    PL:"EU",TR:"EU",UA:"EU",RU:"EU",
+    CN:"AS",JP:"AS",KR:"AS",IN:"AS",PK:"AS",ID:"AS",TH:"AS",VN:"AS",
+    PH:"AS",BD:"AS",SA:"AS",AE:"AS",IR:"AS",IQ:"AS",SY:"AS",
+    AU:"OC",NZ:"OC",
+  };
+
+  const expectedRegion = countryRegion[ipCountry] || "";
+  const mismatch = (expectedRegion && devRegion && expectedRegion !== devRegion);
+
+  if(mismatch){
+    signals.push(`TZ mismatch: device=${devRegion} IP=${expectedRegion}`);
+    flagged.push("tz_mismatch");
+  } else {
+    signals.push(`TZ: ${tz.split("/")[0] || "ok"}`);
+  }
+
+  setBar(50);
+
+  /* ── Decision logic ─────────────────────────── */
+  // Hard block: IP reputation alone OR WebRTC VPN IP alone
+  // Soft block: timezone mismatch alone is NOT enough (too many false positives)
+  // Combined: webrtc_vpn_ip + tz_mismatch = block; tz_mismatch + ip_reputation = block
+  const hardBlock =
+    flagged.includes("ip_reputation") ||
+    flagged.includes("webrtc_vpn_ip") ||
+    (flagged.includes("tz_mismatch") && flagged.length >= 2);
+
+  if(hardBlock){
+    stepErr(2, signals.filter(s => !s.includes("clean") && !s.includes("ok") && !s.includes("TZ: ")).join(" · ") || "VPN detected");
+  } else {
+    stepOk(2, "Clean ✓");
+  }
+
+  return { isVpn: hardBlock, signals, flagged };
 }
 
 /* ── Step 3: Device fingerprint ──────────────── */
@@ -497,20 +638,22 @@ async function getFingerprint(){
 }
 
 /* ── Step 4: Submit to backend ───────────────── */
-async function submit(ip, isVpn, fp){
+async function submit(ip, vpnResult, fp){
   stepActivate(4);
   document.getElementById("i4").textContent = "Sending to server…";
   setBar(90);
 
   const payload = {
-    uid:        window.UID,
-    refId:      window.REF_ID,
-    msgId:      window.MSG_ID,
+    uid:         window.UID,
+    refId:       window.REF_ID,
+    msgId:       window.MSG_ID,
     initData,
     ip,
-    userAgent:  navigator.userAgent,
+    userAgent:   navigator.userAgent,
     fingerprint: fp,
-    isVpn
+    isVpn:       vpnResult.isVpn,
+    vpnSignals:  vpnResult.signals,   // full signal log for backend audit
+    vpnFlagged:  vpnResult.flagged    // which checks triggered
   };
 
   const r = await fetchTimeout(
@@ -531,10 +674,10 @@ async function submit(ip, isVpn, fp){
 ═══════════════════════════════════════════════ */
 (async () => {
   try{
-    const ip    = await getIP();
-    const isVpn = await checkVPN(ip);
+    const ip        = await getIP();
+    const vpnResult = await checkVPN(ip);
 
-    if(isVpn){
+    if(vpnResult.isVpn){
       stepErr(3, "Skipped");
       stepErr(4, "Blocked — VPN detected");
       showFail("vpn");
@@ -543,7 +686,7 @@ async function submit(ip, isVpn, fp){
     }
 
     const fp     = await getFingerprint();
-    const result = await submit(ip, isVpn, fp);
+    const result = await submit(ip, vpnResult, fp);
     setBar(100);
 
     if(result.status === "verified" || result.status === "already_verified"){
