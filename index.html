@@ -154,15 +154,15 @@ body::before{
     <div class="step active" id="s1">
       <div class="dot" id="d1">1</div>
       <div class="step-body">
-        <div class="step-name">Network</div>
-        <div class="step-info" id="i1">Fetching IP…</div>
+        <div class="step-name">Network Connection</div>
+        <div class="step-info" id="i1">Analyzing protocols…</div>
       </div>
       <div class="sp"></div>
     </div>
     <div class="step" id="s2">
       <div class="dot" id="d2">2</div>
       <div class="step-body">
-        <div class="step-name">Device ID</div>
+        <div class="step-name">Hardware Cryptography</div>
         <div class="step-info" id="i2">Waiting…</div>
       </div>
       <div class="sp"></div>
@@ -170,7 +170,7 @@ body::before{
     <div class="step" id="s3">
       <div class="dot" id="d3">3</div>
       <div class="step-body">
-        <div class="step-name">Account Check</div>
+        <div class="step-name">Identity Authentication</div>
         <div class="step-info" id="i3">Waiting…</div>
       </div>
       <div class="sp"></div>
@@ -201,12 +201,11 @@ const $iconZone = document.getElementById("iconZone");
 /* ── Helpers ──────────────────────────────────── */
 function setBar(p){ $bar.style.width = p + "%"; }
 
-// የድሮዎቹን ክላሶች በማጽዳት ስቴቱን በትክክል ለመቀያየር የተሻሻለ
 function activate(n){
   const el = document.getElementById(`s${n}`);
   el.classList.remove("s-ok", "s-err");
   el.classList.add("active");
-  document.getElementById(`i${n}`).textContent = "Running…";
+  document.getElementById(`i${n}`).textContent = "Securing tunnel…";
 }
 function ok(n, info){
   const s = document.getElementById(`s${n}`);
@@ -214,6 +213,7 @@ function ok(n, info){
   document.getElementById(`d${n}`).textContent = "✓";
   document.getElementById(`i${n}`).textContent = info;
 }
+// ስህተት ሲያጋጥም
 function err(n, info){
   const s = document.getElementById(`s${n}`);
   s.classList.remove("active"); s.classList.add("s-err");
@@ -244,22 +244,23 @@ function showErr(reason){
   $pill.className = "pill s-err";
 
   if(reason === "vpn"){
-    document.getElementById("ttl").textContent = "VPN Detected";
-    document.getElementById("sub").textContent = "Please disable your VPN and try again.";
+    // ⚠️ ለ VPN ከሆነ Warning ይላል፡ ተጠቃሚው መታገዱን ሳይሆን VPN እንዲያጠፋ ይመክራል
+    document.getElementById("ttl").textContent = "Warning";
+    document.getElementById("sub").textContent = "VPN/Proxy Link Intercepted.";
     $pill.innerHTML =
-      "🔒 A <strong>VPN or Proxy</strong> is active on your connection.<br><br>" +
-      "Turn it off, then press the verify button in the bot again.";
+      "🔒 <b>እባክዎ VPN ያጥፉ!</b><br>" +
+      "የቪፒኤን ግንኙነት ስለተገኘ ማለፍ አልተቻለም። VPN <b>Disconnect</b> አድርገው በቦቱ በኩል በድጋሚ ይሞክሩ።";
   } else if(reason === "multi" || reason === "clone"){
-    document.getElementById("ttl").textContent = "Duplicate Account";
-    document.getElementById("sub").textContent = "This device is already linked to another account.";
+    // 🚫 ለ ማጭበርበር ከሆነ Banned ይላል
+    document.getElementById("ttl").textContent = "Banned";
+    document.getElementById("sub").textContent = "Hardware integrity violation.";
     $pill.innerHTML =
-      "👤 You are joining with a <strong>secondary account</strong>.<br><br>" +
-      "Please open your <strong>first (main) Telegram account</strong> and use the invite link from there.<br><br>" +
-      "Only real referrals are accepted.";
+      "👤 <b>አካውንትዎ ታግዷል!</b><br>" +
+      "በዚህ ስልክ (Device) ሌላ የቴሌግራም አካውንት ተመዝግቦ ተገኝቷል። ማጭበርበር በጥብቅ የተከለከለ ነው።";
   } else {
-    document.getElementById("ttl").textContent = "Access Denied";
-    document.getElementById("sub").textContent = "Unable to verify. Please try again.";
-    $pill.innerHTML = "❌ " + (reason || "Verification failed. Tap verify in the bot to retry.");
+    document.getElementById("ttl").textContent = "Banned";
+    document.getElementById("sub").textContent = "Security clearance rejected.";
+    $pill.innerHTML = "❌ " + (reason || "የደህንነት ፍተሻውን ማለፍ አልቻሉም።");
   }
 
   tg?.HapticFeedback?.notificationOccurred("error");
@@ -294,7 +295,7 @@ async function post(url, body, ms = 12000){
 }
 
 /* ══════════════════════════════════════════════
-   STEP 1 — Get IP (soft, never blocks)
+   STEP 1 — Get IP (ደብቅ፡ ትክክለኛውን IP ለተጠቃሚው አያሳይም)
 ══════════════════════════════════════════════ */
 async function getIP(){
   activate(1); setBar(10);
@@ -302,22 +303,23 @@ async function getIP(){
     const r  = await get("https://api.ipify.org?format=json");
     const d  = await r.json();
     const ip = (d.ip || "").trim() || "unknown";
-    ok(1, ip); setBar(30);
+    ok(1, "Secure Tunnel Connected"); // IP ተደብቋል
+    setBar(30);
     return ip;
   } catch{
-    ok(1, "Resolved"); setBar(30);
+    ok(1, "Routing Cleared"); 
+    setBar(30);
     return "unknown";
   }
 }
 
 /* ══════════════════════════════════════════════
-   STEP 2 — Device Fingerprint
+   STEP 2 — Device Fingerprint (ደብቅ፡ ሃሹን ለተጠቃሚው አያሳይም)
 ══════════════════════════════════════════════ */
 async function getFingerprint(){
   activate(2); setBar(40);
   const P = [];
 
-  /* Canvas 2D */
   try{
     const c   = document.createElement("canvas");
     c.width   = 240; c.height = 60;
@@ -328,13 +330,9 @@ async function getFingerprint(){
     ctx.fillStyle = "rgba(102,204,0,.7)";
     ctx.font      = "15px 'Arial'";
     ctx.fillText("Squad4xx🔐verify", 4, 20);
-    ctx.fillStyle    = "#0cf";
-    ctx.font         = "bold 13px 'Times New Roman'";
-    ctx.fillText("fingerprint_2026", 10, 45);
     P.push("cv:" + c.toDataURL().slice(-80));
   } catch{ P.push("cv:x"); }
 
-  /* WebGL renderer */
   try{
     const cv = document.createElement("canvas");
     const gl = cv.getContext("webgl") || cv.getContext("experimental-webgl");
@@ -342,9 +340,6 @@ async function getFingerprint(){
       const ext = gl.getExtension("WEBGL_debug_renderer_info");
       P.push("gl_v:" + gl.getParameter(ext?.UNMASKED_VENDOR_WEBGL   || 37445));
       P.push("gl_r:" + gl.getParameter(ext?.UNMASKED_RENDERER_WEBGL || 37446));
-      const vs = gl.getShaderPrecisionFormat(gl.VERTEX_SHADER,   gl.HIGH_FLOAT);
-      const fs = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
-      P.push("gl_p:" + vs?.precision + "," + fs?.precision);
     } else P.push("gl:x");
   } catch{ P.push("gl:x"); }
 
@@ -353,41 +348,12 @@ async function getFingerprint(){
   
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
   P.push("tz:" + tz);
-
   P.push("cpu:" + (navigator.hardwareConcurrency || 0));
-  P.push("mem:" + (navigator.deviceMemory        || 0));
   P.push("plat:" + (navigator.platform           || ""));
   
   const lang = navigator.language || "en";
   P.push("lang:" + lang);
-  P.push("langs:" + (navigator.languages || []).join(","));
-  P.push("touch:" + navigator.maxTouchPoints);
   P.push("ua:" + navigator.userAgent);
-
-  /* Audio fingerprint */
-  try{
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if(AC){
-      const ac  = new AC();
-      const osc = ac.createOscillator();
-      const an  = ac.createAnalyser();
-      const g   = ac.createGain();
-      g.gain.value = 0;
-      osc.type = "triangle";
-      osc.frequency.value = 10000;
-      osc.connect(an); an.connect(g); g.connect(ac.destination);
-      osc.start(0);
-      await new Promise(r => setTimeout(r, 100));
-      const buf = new Float32Array(an.frequencyBinCount);
-      an.getFloatFrequencyData(buf);
-      osc.stop(); ac.close();
-      const sum = buf.slice(0, 30).reduce((a, v) => a + Math.abs(v), 0);
-      P.push("au:" + sum.toFixed(4));
-    } else P.push("au:x");
-  } catch{ P.push("au:x"); }
-
-  P.push("pl:" + (navigator.plugins?.length || 0));
-  P.push("ck:" + navigator.cookieEnabled);
 
   let fp = "";
   try {
@@ -397,12 +363,12 @@ async function getFingerprint(){
     fp  = Array.from(new Uint8Array(buf))
                    .map(b => b.toString(16).padStart(2,"0")).join("");
   } catch (e) {
-    // ፊንገርፕሪንት መስራት ቢያቅተው ባዶ እንዳይሆን Random string መፍጠር (ባክኤንድ እንዳያግደው)
     fp = "fallback_" + Math.random().toString(36).substring(2) + Date.now();
   }
 
-  ok(2, fp.slice(0,12) + "…"); setBar(65);
-  return { fp, raw: P, tz, lang };
+  ok(2, "Hardware Signature Verified"); // Device Hash ተደብቋል
+  setBar(65);
+  return { fp, tz, lang };
 }
 
 /* ══════════════════════════════════════════════
@@ -410,10 +376,9 @@ async function getFingerprint(){
 ══════════════════════════════════════════════ */
 async function submit(ip, fpData){
   activate(3);
-  document.getElementById("i3").textContent = "Checking…";
+  document.getElementById("i3").textContent = "Authenticating…";
   setBar(80);
 
-  // የሰዓት እና ቋንቋ አለመጣጣምን (Mismatches) በመፈተሽ የቪፒኤን ፍንጭ መውሰጃ
   let clientSideVpnHint = false;
   if(fpData.tz && fpData.tz.toLowerCase().includes("ethiopia") === false && fpData.lang.startsWith("am")) {
     clientSideVpnHint = true; 
@@ -425,7 +390,7 @@ async function submit(ip, fpData){
     msgId:       MSG_ID,
     initData:    initData,
     ip:          ip,
-    ua:          navigator.userAgent, // ከባክኤንድ 'ua' ጋር የተናበበ ስም
+    ua:          navigator.userAgent,
     fingerprint: fpData.fp,
     isVpn:       clientSideVpnHint
   });
@@ -446,24 +411,24 @@ async function submit(ip, fpData){
     setBar(100);
 
     if(result.status === "verified" || result.status === "already_verified"){
-      ok(3, "Verified ✓");
+      ok(3, "Passed ✓");
       showOK();
-      closeApp(2200);
+      closeApp(2000);
 
     } else if(result.status === "blocked"){
-      err(3, "Access Denied ✕");
-      // ባክኤንዱ የላከውን ትክክለኛ ምክንያት ለይቶ ማሳያ
+      err(3, "Rejected ✕");
       const reason = result.reason || "multi"; 
       showErr(reason);
-      closeApp(6000);
+      // 💡 ተጠቃሚው VPN ከሆነ መልእክቱን በደንብ እንዲያነብ ሚኒ አፑ 8 ሰከንድ ይቆያል፤ ከዛ ራሱ ይዘጋል
+      closeApp(reason === "vpn" ? 8000 : 5000);
 
     } else {
-      throw new Error("Unexpected response from server");
+      throw new Error("Unexpected response");
     }
 
   } catch(e){
-    err(3, "Failed — retry");
-    showErr(e.message?.includes("Server error") ? e.message : "Verification failed. Please retry.");
+    err(3, "Failed ✕");
+    showErr("System anomaly detected. Please restart the verification flow.");
     console.error("[verify]", e);
   }
 })();
