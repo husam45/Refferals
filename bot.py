@@ -284,17 +284,16 @@ dp          = Dispatcher(storage=MemoryStorage())
 core_router = Router()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FORCE JOIN LOGIC (UPDATED - NO ADMIN REQUIREMENT FOR FAKE)
+# FORCE JOIN LOGIC (የተስተካከለ - በየመካከሉ fake እንዳይመጣ)
 # ─────────────────────────────────────────────────────────────────────────────
 async def inspect_compulsory_memberships(user_id: int) -> list:
     channels = await DataEngine.get_force_channels()
     unjoined = []
     for ch in channels:
-        # 🟡 ፌክ ቻናል ከሆነ ሰርቨር ሳይጠይቅ በቀጥታ ለተጠቃሚው እንዲታይ ያደርገዋል
+        # 🟡 ፌክ ቻናል ከሆነ በየመካከሉ ዳሽቦርድ ላይ ሙሉ በሙሉ ይታለፋል (Skip)
         if ch["bot_added"] == 1:
-            unjoined.append(dict(ch))
             continue
-        # 🔴 እውነተኛ ቻናል ከሆነ ብቻ ቦቱ አድሚን መሆኑን ያረጋግጣል
+        # 🔴 እውነተኛ ቻናል ከሆነ ብቻ ቦቱ አድሚን መሆኑን ያረጋግጣል (with admin)
         try:
             m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
             if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
@@ -304,7 +303,20 @@ async def inspect_compulsory_memberships(user_id: int) -> list:
     return unjoined
 
 async def enforce_membership_gate(event, user_id: int) -> bool:
+    # 1. መጀመሪያ እውነተኛዎቹን ቻናሎች ቼክ እናደርጋለን
     unjoined = await inspect_compulsory_memberships(user_id)
+    
+    # 2. ለመጀመሪያ ጊዜ መግቢያ ላይ ብቻ ከሆነ ፌክ ቻናሎችንም በሊስቱ ውስጥ እናካትታለን
+    is_callback = isinstance(event, CallbackQuery)
+    current_data = event.data if is_callback else ""
+    
+    if not is_callback or current_data in ("ui_return_home", ""):
+        all_channels = await DataEngine.get_force_channels()
+        for ch in all_channels:
+            if ch["bot_added"] == 1:
+                if not any(x['channel_id'] == ch['channel_id'] for x in unjoined):
+                    unjoined.append(dict(ch))
+
     if not unjoined:
         return True
 
@@ -379,7 +391,7 @@ def generate_admin_dashboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📥 Pending Withdrawals",  callback_data="adm_cmd_pending_tickets"), InlineKeyboardButton(text="📢 Broadcast Message",    callback_data="adm_cmd_broadcast")],
         [InlineKeyboardButton(text="🔍 Search User",   callback_data="adm_cmd_search")],
         [InlineKeyboardButton(text="🚫 Ban User",    callback_data="adm_cmd_ban"), InlineKeyboardButton(text="✅ Unban User",  callback_data="adm_cmd_unban")],
-        [InlineKeyboardButton(text="🛑 STOP BOT ENGINE", callback_data="adm_stop_bot_confirm1")], # አዲሱ ማቆሚያ በተን
+        [InlineKeyboardButton(text="🛑 STOP BOT ENGINE", callback_data="adm_stop_bot_confirm1")],
         [InlineKeyboardButton(text="🔙 Back to Main Menu", callback_data="ui_return_home")],
     ])
 
@@ -411,7 +423,7 @@ async def process_start_command(message: Message, state: FSMContext):
     sent = await message.answer(f"{BOT_RULES_CAPTION}\n\n🔐 <b>Next Step:</b> Verify identity via Mini App:", reply_markup=generate_verification_widget(uid, ref, 0))
     await sent.edit_reply_markup(reply_markup=generate_verification_widget(uid, ref, sent.message_id))
 
-# 🔴 እውነተኛ ቻናሎችን ብቻ ቼክ የሚያደርግ ፈንክሽን
+# 🔴 እውነተኛ ቻናሎችን ብቻ ቼክ የሚያደርግ (with admin)
 @core_router.callback_query(F.data == "ui_revalidate_channels")
 async def process_channel_revalidation(callback: CallbackQuery, state: FSMContext):
     uid = callback.from_user.id
@@ -419,7 +431,7 @@ async def process_channel_revalidation(callback: CallbackQuery, state: FSMContex
     
     real_unjoined = []
     for ch in channels:
-        if ch["bot_added"] == 0:  # እውነተኛ ቻናል ብቻ ነው ቴሌግራም ላይ ቼክ የሚደረገው
+        if ch["bot_added"] == 0:  # እውነተኛ ብቻ ቴሌግራም ላይ ቼክ ይደረጋል
             try:
                 m = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=uid)
                 if m.status in (ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, ChatMemberStatus.RESTRICTED):
@@ -679,7 +691,7 @@ async def process_add_channel_finalize(message: Message, state: FSMContext):
 async def process_add_noadmin_start(callback: CallbackQuery, state: FSMContext):
     if not evaluate_admin_access(callback.from_user.id): return
     await state.set_state(AdminConsoleWorkflow.append_noadmin_link)
-    await callback.message.edit_text("🟡 <b>Fake Force Join (ማስመሰያ - No Admin Required)</b>\n\nየቻናሉን <b>ሊንክ</b> አስገባ (e.g. https://t.me/xxxx):", reply_markup=generate_fallback_navigation("ui_admin_core"))
+    await callback.message.edit_text("🟡 <b>Fake Join (ማስመሰያ - No Admin Required)</b>\n\nየቻናሉን <b>ሊንክ</b> አስገባ (e.g. https://t.me/xxxx):", reply_markup=generate_fallback_navigation("ui_admin_core"))
 
 @core_router.message(AdminConsoleWorkflow.append_noadmin_link)
 async def process_noadmin_link(message: Message, state: FSMContext):
@@ -728,12 +740,11 @@ async def process_rm_channel_action(callback: CallbackQuery):
     await callback.message.edit_text("✅ Channel configuration removed.", reply_markup=generate_admin_dashboard())
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🛑 STOP BOT SYSTEM WITH DOUBLE CONFIRMATION (NEW)
+# 🛑 STOP BOT SYSTEM WITH DOUBLE CONFIRMATION
 # ─────────────────────────────────────────────────────────────────────────────
 @core_router.callback_query(F.data == "adm_stop_bot_confirm1")
 async def stop_bot_first_confirmation(callback: CallbackQuery):
     if not evaluate_admin_access(callback.from_user.id): return
-    # ⚠️ ደረጃ 1፡ የመጀመሪያ ማስጠንቀቂያ
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚠️ ኃላፊነቱን እወስዳለሁ - ቀጥል", callback_data="adm_stop_bot_confirm2")],
         [InlineKeyboardButton(text="❌ አቁም/ተመለስ", callback_data="ui_admin_core")]
@@ -747,7 +758,6 @@ async def stop_bot_first_confirmation(callback: CallbackQuery):
 @core_router.callback_query(F.data == "adm_stop_bot_confirm2")
 async def stop_bot_final_confirmation(callback: CallbackQuery):
     if not evaluate_admin_access(callback.from_user.id): return
-    # 🔥 ደረጃ 2፡ የመጨረሻ ማረጋገጫ (ቀይ በተን)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛑 አሁኑኑ ቦቱ ይጥፋ! (SHUTDOWN)", callback_data="adm_stop_bot_execute")],
         [InlineKeyboardButton(text="❌ ተመለስ", callback_data="ui_admin_core")]
@@ -763,7 +773,6 @@ async def execute_bot_shutdown(callback: CallbackQuery):
     if not evaluate_admin_access(callback.from_user.id): return
     await callback.message.edit_text("💀 <b>Bot engine system is shutting down... Goodbye!</b>")
     logger.critical("Admin requested manual engine shutdown. Terminating process loops.")
-    # 💥 ፕሮሰሱን ሙሉ በሙሉ ያቆመዋል
     sys.exit(0)
 
 # ─────────────────────────────────────────────────────────────────────────────
