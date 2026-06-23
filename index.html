@@ -470,20 +470,17 @@ async function checkVPN(ip){
   try{
     const localIPs = await getWebRTCIPs();
     const vpnLocal = localIPs.filter(isVpnLocalIP);
-    // also flag if NO local IP at all (some VPNs block WebRTC entirely — also suspicious)
-    const hasLocal = localIPs.some(i => i.startsWith("192.168.") || i.startsWith("10.") || i.startsWith("172."));
     if(vpnLocal.length > 0){
+      // Real VPN tunnel IP exposed — hard signal
       signals.push(`WebRTC: ${vpnLocal[0]}`);
       flagged.push("webrtc_vpn_ip");
-    } else if(localIPs.length === 0){
-      // WebRTC fully blocked — treated as weak signal only
-      signals.push("WebRTC: blocked");
-      // don't hard-flag, combine with others
     } else {
+      // Clean LAN IP (192.168.x.x) or no IP at all — both are normal, never flag
       signals.push("WebRTC: clean");
     }
   }catch{
-    signals.push("WebRTC: unavailable");
+    // WebRTC not supported — not suspicious
+    signals.push("WebRTC: n/a");
   }
 
   setBar(40);
@@ -549,16 +546,20 @@ async function checkVPN(ip){
   setBar(50);
 
   /* ── Decision logic ─────────────────────────── */
-  // Hard block: IP reputation alone OR WebRTC VPN IP alone
-  // Soft block: timezone mismatch alone is NOT enough (too many false positives)
-  // Combined: webrtc_vpn_ip + tz_mismatch = block; tz_mismatch + ip_reputation = block
+  // ONLY block on hard proof — never on timezone alone or combination guesses
+  // Rule 1: IP reputation from proxycheck says VPN/proxy/TOR → block
+  // Rule 2: WebRTC leaks a VPN tunnel IP (10.x.x.x or 172.16-31.x.x) → block
+  // Rule 3: BOTH webrtc blocked AND ip_reputation flagged → block
+  // Timezone mismatch = NEVER used for blocking, only logged for backend
   const hardBlock =
     flagged.includes("ip_reputation") ||
-    flagged.includes("webrtc_vpn_ip") ||
-    (flagged.includes("tz_mismatch") && flagged.length >= 2);
+    flagged.includes("webrtc_vpn_ip");
 
   if(hardBlock){
-    stepErr(2, signals.filter(s => !s.includes("clean") && !s.includes("ok") && !s.includes("TZ: ")).join(" · ") || "VPN detected");
+    const reasons = signals
+      .filter(s => s.includes("flagged") || s.includes("VPN") || s.includes("10.") || s.includes("172."))
+      .join(" · ");
+    stepErr(2, reasons || "VPN / Proxy detected");
   } else {
     stepOk(2, "Clean ✓");
   }
